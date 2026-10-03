@@ -1,0 +1,9 @@
+line-length = 105
+target-version = "py312"
+
+[lint]
+select = ["E", "F", "I", "UP"]
+ignore = ["E501"]
+
+[lint.isort]
+known-first-party = ["insight"]

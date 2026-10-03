@@ -1,0 +1,1509 @@
+{
+  "id": "ecommerce",
+  "title": "电商经营",
+  "description": "交易、营销、履约、售后与供应商业务域的合成企业模板；支持订单队列贡献利润桥接和履约退款诊断。 报告年度2025，观察延伸至2026-03-31；仅合成数据，结论必须从实际查询计算。",
+  "schema_version": "light-bi-3.1",
+  "date_range": {
+    "start": "2024-01-01",
+    "end": "2026-03-31"
+  },
+  "tables": [
+    {
+      "name": "customers",
+      "description": "2000名合成客户；首次有效购买日期由completed订单历史确定，不以注册日期代替",
+      "grain": "一客户一行",
+      "columns": {
+        "customer_id": "INTEGER",
+        "customer_name": "VARCHAR",
+        "region": "VARCHAR",
+        "signup_date": "DATE"
+      }
+    },
+    {
+      "name": "products",
+      "description": "120个商品；类别、参考标价与成本。交易历史以明细为准",
+      "grain": "一商品一行",
+      "columns": {
+        "product_id": "INTEGER",
+        "product_name": "VARCHAR",
+        "category": "VARCHAR",
+        "list_price": "DOUBLE",
+        "unit_cost": "DOUBLE"
+      }
+    },
+    {
+      "name": "orders",
+      "description": "订单表，金额含各行成交额；completed 才计入已完成销售",
+      "grain": "一订单一行",
+      "columns": {
+        "order_id": "INTEGER",
+        "customer_id": "INTEGER",
+        "order_date": "DATE",
+        "channel": "VARCHAR",
+        "status": "VARCHAR",
+        "order_total": "DOUBLE",
+        "order_month": "DATE"
+      }
+    },
+    {
+      "name": "order_items",
+      "description": "交易发生时的数量、成交单价和单位成本",
+      "grain": "一订单明细一行",
+      "columns": {
+        "item_id": "INTEGER",
+        "order_id": "INTEGER",
+        "product_id": "INTEGER",
+        "quantity": "INTEGER",
+        "unit_price": "DOUBLE",
+        "unit_cost": "DOUBLE"
+      }
+    },
+    {
+      "name": "refunds",
+      "description": "退款记录，completed 表示退款成功，processing 不计已退金额",
+      "grain": "一退款一行",
+      "columns": {
+        "refund_id": "INTEGER",
+        "order_id": "INTEGER",
+        "item_id": "INTEGER",
+        "refund_date": "DATE",
+        "refund_amount": "DOUBLE",
+        "status": "VARCHAR"
+      }
+    },
+    {
+      "name": "marketing_spend",
+      "description": "日×投放渠道支出，spend=acquisition_spend+retention_spend；拉新支出单列用于CAC",
+      "grain": "日期×渠道",
+      "columns": {
+        "spend_date": "DATE",
+        "channel": "VARCHAR",
+        "spend": "DOUBLE",
+        "acquisition_spend": "DOUBLE",
+        "retention_spend": "DOUBLE",
+        "month_start": "DATE"
+      }
+    },
+    {
+      "name": "suppliers",
+      "description": "商品供应商",
+      "grain": "供应商",
+      "columns": {
+        "supplier_id": "INTEGER",
+        "supplier_name": "VARCHAR",
+        "region": "VARCHAR"
+      }
+    },
+    {
+      "name": "product_batches",
+      "description": "商品批次及供货方；批次关联不证明供应商责任",
+      "grain": "批次",
+      "columns": {
+        "batch_id": "INTEGER",
+        "product_id": "INTEGER",
+        "supplier_id": "INTEGER",
+        "available_from": "DATE"
+      }
+    },
+    {
+      "name": "order_item_batches",
+      "description": "成交明细与批次映射",
+      "grain": "订单明细",
+      "columns": {
+        "item_id": "INTEGER",
+        "batch_id": "INTEGER"
+      }
+    },
+    {
+      "name": "campaigns",
+      "description": "营销活动有效时间与渠道",
+      "grain": "活动",
+      "columns": {
+        "campaign_id": "INTEGER",
+        "channel": "VARCHAR",
+        "campaign_name": "VARCHAR",
+        "start_date": "DATE",
+        "end_date": "DATE"
+      }
+    },
+    {
+      "name": "order_promotions",
+      "description": "订单实际分摊折扣，订单金额已扣该折扣",
+      "grain": "订单",
+      "columns": {
+        "order_id": "INTEGER",
+        "campaign_id": "INTEGER",
+        "discount_amount": "DOUBLE"
+      }
+    },
+    {
+      "name": "shipments",
+      "description": "合成履约承诺及签收事实",
+      "grain": "包裹",
+      "columns": {
+        "shipment_id": "INTEGER",
+        "order_id": "INTEGER",
+        "promised_date": "DATE",
+        "delivered_date": "DATE",
+        "carrier": "VARCHAR"
+      }
+    },
+    {
+      "name": "fulfillment_costs",
+      "description": "订单履约费用与支付费用，不含公司固定管理费",
+      "grain": "费用账单",
+      "columns": {
+        "cost_id": "INTEGER",
+        "shipment_id": "INTEGER",
+        "shipping_cost": "DOUBLE",
+        "payment_fee": "DOUBLE"
+      }
+    },
+    {
+      "name": "return_cases",
+      "description": "售后原因是登记信息，不是最终因果判定",
+      "grain": "售后申请",
+      "columns": {
+        "case_id": "INTEGER",
+        "refund_id": "INTEGER",
+        "reason": "VARCHAR",
+        "case_state": "VARCHAR",
+        "item_id": "INTEGER"
+      }
+    },
+    {
+      "name": "business_calendar",
+      "grain": "日期",
+      "description": "确定性日历；报告期与观察期分开",
+      "columns": {
+        "calendar_date": "DATE",
+        "month_start": "DATE",
+        "is_month_end": "BOOLEAN"
+      }
+    },
+    {
+      "name": "customer_acquisition",
+      "description": "首次获客触点，每客户一行；不能用后续订单渠道替代获客归因",
+      "grain": "客户首次触点",
+      "columns": {
+        "customer_id": "INTEGER",
+        "touch_date": "DATE",
+        "acquisition_channel": "VARCHAR"
+      }
+    }
+  ],
+  "relations": [
+    {
+      "left_table": "orders",
+      "left_column": "customer_id",
+      "right_table": "customers",
+      "right_column": "customer_id",
+      "cardinality": "many_to_one"
+    },
+    {
+      "left_table": "order_items",
+      "left_column": "order_id",
+      "right_table": "orders",
+      "right_column": "order_id",
+      "cardinality": "many_to_one"
+    },
+    {
+      "left_table": "order_items",
+      "left_column": "product_id",
+      "right_table": "products",
+      "right_column": "product_id",
+      "cardinality": "many_to_one"
+    },
+    {
+      "left_table": "refunds",
+      "left_column": "order_id",
+      "right_table": "orders",
+      "right_column": "order_id",
+      "cardinality": "many_to_one"
+    },
+    {
+      "left_table": "refunds",
+      "left_column": "item_id",
+      "right_table": "order_items",
+      "right_column": "item_id",
+      "cardinality": "many_to_one"
+    },
+    {
+      "left_table": "orders",
+      "left_column": "channel",
+      "right_table": "marketing_spend",
+      "right_column": "channel",
+      "additional_keys": [
+        {
+          "left_column": "order_date",
+          "right_column": "spend_date"
+        }
+      ],
+      "description": "分别将已完成订单销售与推广费用聚合到日期×渠道后，再同时按日期与渠道关联；不可只按渠道连接原始事实行。",
+      "cardinality": "many_to_one",
+      "preaggregation": "两侧先分别按全部关联键聚合，包含日期与对象维度，禁止重复累计事实金额。"
+    },
+    {
+      "left_table": "product_batches",
+      "left_column": "product_id",
+      "right_table": "products",
+      "right_column": "product_id",
+      "cardinality": "many_to_one"
+    },
+    {
+      "left_table": "product_batches",
+      "left_column": "supplier_id",
+      "right_table": "suppliers",
+      "right_column": "supplier_id",
+      "cardinality": "many_to_one"
+    },
+    {
+      "left_table": "order_item_batches",
+      "left_column": "item_id",
+      "right_table": "order_items",
+      "right_column": "item_id",
+      "cardinality": "many_to_one"
+    },
+    {
+      "left_table": "order_item_batches",
+      "left_column": "batch_id",
+      "right_table": "product_batches",
+      "right_column": "batch_id",
+      "cardinality": "many_to_one"
+    },
+    {
+      "left_table": "refunds",
+      "left_column": "item_id",
+      "right_table": "order_item_batches",
+      "right_column": "item_id",
+      "cardinality": "many_to_one"
+    },
+    {
+      "left_table": "order_promotions",
+      "left_column": "order_id",
+      "right_table": "orders",
+      "right_column": "order_id",
+      "cardinality": "many_to_one"
+    },
+    {
+      "left_table": "order_promotions",
+      "left_column": "campaign_id",
+      "right_table": "campaigns",
+      "right_column": "campaign_id",
+      "cardinality": "many_to_one"
+    },
+    {
+      "left_table": "shipments",
+      "left_column": "order_id",
+      "right_table": "orders",
+      "right_column": "order_id",
+      "cardinality": "many_to_one"
+    },
+    {
+      "left_table": "fulfillment_costs",
+      "left_column": "shipment_id",
+      "right_table": "shipments",
+      "right_column": "shipment_id",
+      "cardinality": "many_to_one"
+    },
+    {
+      "left_table": "return_cases",
+      "left_column": "refund_id",
+      "right_table": "refunds",
+      "right_column": "refund_id",
+      "cardinality": "many_to_one"
+    },
+    {
+      "left_table": "return_cases",
+      "left_column": "item_id",
+      "right_table": "order_items",
+      "right_column": "item_id",
+      "cardinality": "many_to_one"
+    },
+    {
+      "left_table": "orders",
+      "left_column": "customer_id",
+      "right_table": "orders",
+      "right_column": "customer_id",
+      "cardinality": "many_to_many",
+      "preaggregation": "两侧先在所需完整粒度聚合，再使用全部批准键关联",
+      "description": "两侧先在所需完整粒度聚合，再使用全部批准键关联"
+    },
+    {
+      "left_table": "orders",
+      "left_column": "order_date",
+      "right_table": "orders",
+      "right_column": "order_date",
+      "cardinality": "many_to_many",
+      "preaggregation": "两侧先在所需完整粒度聚合，再使用全部批准键关联",
+      "description": "两侧先在所需完整粒度聚合，再使用全部批准键关联",
+      "additional_keys": [
+        {
+          "left_column": "channel",
+          "right_column": "channel"
+        }
+      ]
+    },
+    {
+      "left_table": "customer_acquisition",
+      "left_column": "customer_id",
+      "right_table": "customers",
+      "right_column": "customer_id",
+      "cardinality": "many_to_many",
+      "preaggregation": "两侧先在所需完整粒度聚合，再使用全部批准键关联",
+      "description": "两侧先在所需完整粒度聚合，再使用全部批准键关联"
+    },
+    {
+      "left_table": "customer_acquisition",
+      "left_column": "customer_id",
+      "right_table": "orders",
+      "right_column": "customer_id",
+      "cardinality": "many_to_many",
+      "preaggregation": "两侧先在所需完整粒度聚合，再使用全部批准键关联",
+      "description": "两侧先在所需完整粒度聚合，再使用全部批准键关联"
+    },
+    {
+      "left_table": "customer_acquisition",
+      "left_column": "acquisition_channel",
+      "right_table": "marketing_spend",
+      "right_column": "channel",
+      "cardinality": "many_to_many",
+      "preaggregation": "两侧先在所需完整粒度聚合，再使用全部批准键关联",
+      "description": "两侧先在所需完整粒度聚合，再使用全部批准键关联"
+    },
+    {
+      "left_table": "orders",
+      "left_column": "order_month",
+      "right_table": "marketing_spend",
+      "right_column": "month_start",
+      "additional_keys": [
+        {
+          "left_column": "channel",
+          "right_column": "channel"
+        }
+      ],
+      "cardinality": "many_to_many",
+      "description": "先按自然月×渠道分别聚合，再按订单成交额份额分配月营销；禁止原始明细直接连接",
+      "preaggregation": "营销按month_start与channel聚合；订单分母按order_month与channel聚合，再按订单成交额比例分摊"
+    },
+    {
+      "left_table": "orders",
+      "left_column": "order_month",
+      "right_table": "orders",
+      "right_column": "order_month",
+      "additional_keys": [
+        {
+          "left_column": "channel",
+          "right_column": "channel"
+        }
+      ],
+      "cardinality": "many_to_one",
+      "description": "已聚合的月渠道订单收入分母回连订单"
+    }
+  ],
+  "metrics": [
+    {
+      "id": "sales",
+      "name": "销售额",
+      "aliases": [
+        "GMV",
+        "成交额",
+        "营收"
+      ],
+      "expression": "SUM(orders.order_total)",
+      "description": "按 order_date 统计 status='completed' 的订单金额，未扣退款与推广费用；汇总订单层时不可因明细关联重复累计。",
+      "tables": [
+        "orders"
+      ],
+      "columns": [
+        "order_total",
+        "status",
+        "order_date"
+      ],
+      "dimensions": [
+        "channel",
+        "region",
+        "order_date"
+      ],
+      "time_column": "orders.order_date",
+      "grain": "订单",
+      "unit": "CNY",
+      "filters": [
+        "orders.status='completed'"
+      ],
+      "additivity": "additive"
+    },
+    {
+      "id": "gross_profit",
+      "name": "毛利",
+      "aliases": [
+        "毛利润"
+      ],
+      "expression": "SUM(order_items.quantity * (order_items.unit_price - order_items.unit_cost))",
+      "description": "仅统计 completed 订单；使用交易发生时的明细成本，不扣退款和推广费用，不能称为净利润。",
+      "tables": [
+        "orders",
+        "order_items"
+      ],
+      "columns": [
+        "quantity",
+        "unit_price",
+        "unit_cost",
+        "status"
+      ],
+      "dimensions": [
+        "channel",
+        "category",
+        "order_date"
+      ],
+      "time_column": "orders.order_date",
+      "grain": "订单明细",
+      "unit": "CNY",
+      "filters": [
+        "orders.status='completed'"
+      ],
+      "additivity": "additive"
+    },
+    {
+      "id": "gross_margin",
+      "name": "毛利率",
+      "aliases": [
+        "销售毛利率"
+      ],
+      "expression": "SUM(order_items.quantity * (order_items.unit_price - order_items.unit_cost)) / NULLIF(SUM(order_items.quantity * order_items.unit_price),0)",
+      "description": "completed 订单明细；汇总毛利除以汇总销售，不能直接平均各单毛利率；返回0到1比例。",
+      "tables": [
+        "orders",
+        "order_items"
+      ],
+      "columns": [
+        "quantity",
+        "unit_price",
+        "unit_cost",
+        "status"
+      ],
+      "dimensions": [
+        "channel",
+        "category",
+        "order_date"
+      ],
+      "time_column": "orders.order_date",
+      "grain": "订单明细",
+      "unit": "ratio",
+      "filters": [
+        "orders.status='completed'"
+      ],
+      "additivity": "ratio",
+      "denominator": "已完成订单明细销售额之和"
+    },
+    {
+      "id": "refund_amount",
+      "name": "退款金额",
+      "aliases": [
+        "已退款",
+        "成功退款金额"
+      ],
+      "expression": "SUM(refunds.refund_amount)",
+      "description": "按 refund_date 统计退款 status='completed' 的金额；与订单 status 区分。",
+      "tables": [
+        "refunds"
+      ],
+      "columns": [
+        "refund_amount",
+        "refund_date",
+        "status"
+      ],
+      "dimensions": [
+        "channel",
+        "refund_date"
+      ],
+      "time_column": "refunds.refund_date",
+      "grain": "退款",
+      "unit": "CNY",
+      "filters": [
+        "refunds.status='completed'"
+      ],
+      "additivity": "additive"
+    },
+    {
+      "id": "aov",
+      "name": "客单价",
+      "aliases": [
+        "平均订单金额"
+      ],
+      "expression": "SUM(orders.order_total) / NULLIF(COUNT(DISTINCT orders.order_id),0)",
+      "description": "completed 订单销售额除以订单数，先保持每订单一行，金额未扣退款。",
+      "tables": [
+        "orders"
+      ],
+      "columns": [
+        "order_total",
+        "order_id",
+        "status"
+      ],
+      "dimensions": [
+        "channel",
+        "order_date"
+      ],
+      "time_column": "orders.order_date",
+      "grain": "订单",
+      "unit": "CNY/order",
+      "filters": [
+        "orders.status='completed'"
+      ],
+      "additivity": "ratio",
+      "denominator": "同口径已完成订单或交易去重数"
+    },
+    {
+      "id": "roas",
+      "name": "推广产出比",
+      "aliases": [
+        "ROAS",
+        "渠道效率"
+      ],
+      "expression": "sales / NULLIF(spend,0)",
+      "description": "将 completed 订单销售额及推广费用分别按同一日期×渠道聚合后关联；零支出返回 NULL，不写成零回报或无穷大。",
+      "tables": [
+        "orders",
+        "marketing_spend"
+      ],
+      "columns": [
+        "order_total",
+        "order_date",
+        "spend",
+        "spend_date",
+        "channel"
+      ],
+      "dimensions": [
+        "channel",
+        "spend_date"
+      ],
+      "time_column": "orders.order_date",
+      "grain": "日期×渠道",
+      "unit": "ratio",
+      "filters": [
+        "orders.status='completed'"
+      ],
+      "additivity": "ratio",
+      "denominator": "同日期渠道推广支出"
+    },
+    {
+      "id": "contribution_profit",
+      "name": "订单队列贡献利润",
+      "aliases": [
+        "订单队列贡献利润"
+      ],
+      "expression": "gross_sales-discounts-refunds-cogs-fulfillment-payment_fees-marketing",
+      "description": "2025完成订单贡献利润=成交额−历史成交成本−该订单下单后0至30天成功退款−履约−支付费用−营销费用。观察至2026-03-31可覆盖全年订单。订单折扣与费用按明细折前金额占比分摊，明细成本取实际历史值；营销先汇总自然月×订单渠道，再按该月渠道内订单成交额比例估计分配，最后按折前占比分到明细，分项须还原整体。这是经营贡献，不是净利润或因果归因。",
+      "component_formulas": {
+        "sales": "SUM(completed orders.order_total)",
+        "gross_sales": "SUM(quantity*products.list_price)",
+        "discounts": "gross_sales-sales",
+        "cogs": "SUM(quantity*unit_cost)",
+        "refunds": "每笔成功退款按order_id归属，refund_date在order_date后0至30天",
+        "fulfillment": "先按order_id汇总包裹费用",
+        "payment_fees": "先按order_id汇总支付费用",
+        "marketing": "同自然月同订单渠道spend按该月该渠道订单成交额占比分配；不是增量因果效果",
+        "category_allocation": "订单折扣/退款/履约/支付/营销按折前金额占比分到明细，成本用明细实际成本"
+      },
+      "coverage_rule": "所有渠道支出均取实际营销表，不能假设自然搜索零费用。按月×渠道收入份额估计分摊；无成交但有支出的月渠道需独立列未分摊费用，未核对时不能宣称全额利润。",
+      "tables": [
+        "orders",
+        "order_items",
+        "products",
+        "order_promotions",
+        "refunds",
+        "shipments",
+        "fulfillment_costs",
+        "marketing_spend"
+      ],
+      "columns": [
+        "order_date",
+        "channel",
+        "quantity",
+        "list_price",
+        "unit_cost",
+        "discount_amount",
+        "refund_amount",
+        "shipping_cost",
+        "payment_fee",
+        "spend"
+      ],
+      "dimensions": [
+        "channel",
+        "period"
+      ],
+      "time_column": "orders.order_date",
+      "grain": "订单队列×日期×渠道",
+      "unit": "元",
+      "filters": [
+        "orders.status='completed'",
+        "refunds.status='completed'",
+        "完整成熟30天订单月份"
+      ],
+      "additivity": "additive"
+    },
+    {
+      "id": "mature_refund_rate",
+      "name": "成熟订单退款率",
+      "aliases": [
+        "成熟订单退款率"
+      ],
+      "expression": "COUNT(DISTINCT refunded_order_id)/NULLIF(COUNT(DISTINCT order_id),0)",
+      "description": "一般总体指标：以订单日期形成至少观察30天的完成订单队列，成功退款订单去重为分子，完成订单为分母；不因物流缺失或未签收排除订单。若限定下单后30日退款必须显式说明退款窗口。履约关联诊断另用delivered_cohort_refund_rate，不能混用分母。",
+      "tables": [
+        "orders",
+        "refunds"
+      ],
+      "columns": [
+        "order_id",
+        "order_date",
+        "status",
+        "refund_amount"
+      ],
+      "dimensions": [
+        "channel",
+        "period"
+      ],
+      "time_column": "orders.order_date",
+      "grain": "订单队列×日期×渠道",
+      "unit": "ratio",
+      "filters": [
+        "orders.status='completed'",
+        "退款status='completed'",
+        "订单已完整观察30天"
+      ],
+      "additivity": "ratio",
+      "denominator": "已完整观察30天的完成订单去重数"
+    },
+    {
+      "id": "delivery_late_rate",
+      "name": "履约超时率",
+      "aliases": [
+        "履约超时率"
+      ],
+      "expression": "late_delivered_orders/NULLIF(delivered_orders,0)",
+      "description": "实际签收日期晚于承诺日期为超时；仅基于已签收包裹，未签收应单独报告。",
+      "tables": [
+        "shipments"
+      ],
+      "columns": [
+        "promised_date",
+        "delivered_date",
+        "carrier"
+      ],
+      "dimensions": [
+        "carrier"
+      ],
+      "time_column": "shipments.delivered_date",
+      "grain": "签收包裹",
+      "unit": "ratio",
+      "filters": [
+        "delivered_date IS NOT NULL"
+      ],
+      "additivity": "ratio",
+      "denominator": "实际已签收包裹数"
+    },
+    {
+      "id": "delivered_cohort_refund_rate",
+      "name": "成熟且履约可判定订单30日退款率",
+      "aliases": [
+        "成熟且履约可判定订单30日退款率"
+      ],
+      "expression": "refunded_orders_within_30d/NULLIF(known_fulfillment_mature_orders,0)",
+      "description": "完成订单先形成成熟30天队列；每单至少一个包裹，全部包裹承诺与签收日期完整且截至数据截止日均已签收才进入本诊断分母。成功退款须在下单后0至30天内，订单只计一次。按订单自身channel互斥分组；跨承运商多包裹不拆单。缺少/未签收包裹保留为配送未知，不当作按时，必须另报数量。",
+      "tables": [
+        "orders",
+        "shipments",
+        "refunds"
+      ],
+      "columns": [
+        "order_id",
+        "order_date",
+        "channel",
+        "status",
+        "promised_date",
+        "delivered_date",
+        "refund_date"
+      ],
+      "dimensions": [
+        "channel"
+      ],
+      "time_column": "orders.order_date",
+      "grain": "成熟且履约可判定订单队列×渠道",
+      "unit": "ratio",
+      "filters": [
+        "orders.status='completed'",
+        "order_date+30天<=数据截止日",
+        "所有包裹承诺与签收日期完整且截至截止日已签收",
+        "成功退款限定下单后0至30天"
+      ],
+      "additivity": "ratio",
+      "denominator": "成熟30天且所有包裹履约可判定的去重完成订单数"
+    },
+    {
+      "id": "delivered_order_late_rate",
+      "name": "成熟履约可判定订单延迟率",
+      "aliases": [
+        "成熟履约可判定订单延迟率"
+      ],
+      "expression": "late_orders/NULLIF(known_fulfillment_mature_orders,0)",
+      "description": "与delivered_cohort_refund_rate使用完全相同订单队列。包裹先按order_id汇总，每单任一包裹delivered_date>promised_date即判整单延迟；仅所有包裹可判定的订单进入分母。一单多包裹、多承运商也只计一次。不能替换按包裹计算的delivery_late_rate。",
+      "tables": [
+        "orders",
+        "shipments"
+      ],
+      "columns": [
+        "order_id",
+        "order_date",
+        "channel",
+        "status",
+        "promised_date",
+        "delivered_date"
+      ],
+      "dimensions": [
+        "channel"
+      ],
+      "time_column": "orders.order_date",
+      "grain": "成熟且履约可判定订单队列×渠道",
+      "unit": "ratio",
+      "filters": [
+        "orders.status='completed'",
+        "order_date+30天<=数据截止日",
+        "所有包裹承诺与签收日期完整且截至截止日已签收"
+      ],
+      "additivity": "ratio",
+      "denominator": "成熟30天且所有包裹履约可判定的去重完成订单数"
+    },
+    {
+      "id": "delivered_cohort_refund_amount",
+      "name": "成熟履约可判定订单队列30日退款金额",
+      "aliases": [
+        "成熟履约可判定订单队列30日退款金额"
+      ],
+      "expression": "SUM(refunds.refund_amount)",
+      "description": "严格复用delivered_cohort_refund_rate订单队列与下单后0至30天成功退款窗口，以订单日期归属，而非按refund_date汇总当期退款。每个refund_id只计一次金额，售后原因先按refund_id合并，多原因标记为多原因；批次标签按item_id归并，缺标签保留为未记录。分组退款订单数可跨原因重叠，不能将其简单求和当总退款订单数。",
+      "tables": [
+        "orders",
+        "shipments",
+        "refunds",
+        "return_cases",
+        "order_item_batches",
+        "product_batches",
+        "suppliers",
+        "products"
+      ],
+      "columns": [
+        "order_id",
+        "order_date",
+        "channel",
+        "promised_date",
+        "delivered_date",
+        "refund_id",
+        "refund_date",
+        "refund_amount",
+        "reason",
+        "item_id",
+        "batch_id",
+        "supplier_name",
+        "product_name"
+      ],
+      "dimensions": [
+        "channel",
+        "supplier",
+        "product"
+      ],
+      "time_column": "orders.order_date",
+      "grain": "成熟履约可判定订单队列中的成功退款记录",
+      "unit": "元",
+      "filters": [
+        "orders.status='completed'",
+        "order_date+30天<=数据截止日",
+        "所有包裹承诺与签收日期完整且截至截止日已签收",
+        "成功退款限定下单后0至30天"
+      ],
+      "additivity": "additive"
+    },
+    {
+      "id": "order_count",
+      "name": "有效订单量",
+      "aliases": [
+        "有效订单量"
+      ],
+      "expression": "COUNT(DISTINCT orders.order_id)",
+      "description": "仅completed订单；不能将明细数、包裹数当订单量",
+      "tables": [
+        "orders"
+      ],
+      "columns": [
+        "order_id",
+        "order_date",
+        "status"
+      ],
+      "dimensions": [],
+      "time_column": "orders.order_date",
+      "grain": "订单",
+      "unit": "单",
+      "filters": [
+        "遵循指标描述中的期间、状态和成熟窗口"
+      ],
+      "additivity": "additive"
+    },
+    {
+      "id": "first_touch_cac",
+      "name": "首次触点归因新客成本",
+      "aliases": [
+        "首次触点归因新客成本"
+      ],
+      "expression": "acquisition_spend/new_customers",
+      "description": "期间渠道拉新支出除以归属该首次获客触点的期间首次有效购买客户数。首购取全历史completed订单最早日期；不是注册数或订单渠道。零分母返回NULL。",
+      "tables": [
+        "orders",
+        "customer_acquisition",
+        "marketing_spend"
+      ],
+      "columns": [
+        "customer_id",
+        "order_date",
+        "status",
+        "acquisition_channel",
+        "acquisition_spend",
+        "spend_date",
+        "channel"
+      ],
+      "dimensions": [],
+      "time_column": "orders.order_date",
+      "grain": "报告期×首次获客渠道",
+      "unit": "元/客户",
+      "filters": [
+        "遵循指标描述中的期间、状态和成熟窗口"
+      ],
+      "additivity": "ratio",
+      "denominator": "期间首购且首次触点归属该渠道的去重客户数"
+    },
+    {
+      "id": "realized_value_90d",
+      "name": "首购后90日已实现贡献",
+      "aliases": [
+        "首购后90日已实现贡献"
+      ],
+      "expression": "realized_90d_contribution_before_acquisition/eligible_90d",
+      "description": "首购日为day0，90日窗口为[首购日,首购日+90天)，包含day0至day89，不包含day90；数据截止日期表示该日完整观测，因此成熟条件为首购日+89天<=observation_end。窗口内完成交易成交额减历史成本、履约、支付、估计留存营销及窗口内实际成功退款。留存营销先按订单发生的自然月×实际成交渠道汇总retention_spend，再按该月该成交渠道的订单收入份额分到订单；订单贡献随后归客户并按客户首次获客渠道汇总。这是费用分摊与客户分组两层维度，不要求订单成交渠道等于首次获客渠道。拉新支出不在该贡献中重复扣除。当同一报告期同一首次获客渠道的全部新客都已成熟且人数>0时，允许已实现90日人均贡献减CAC得到value_minus_cac；仅是该队列已实现净差额，不是完整LTV或渠道因果收益。未完全成熟时不直接相减，不使用窗口外退款。",
+      "window_definition": {
+        "start_inclusive": "first_date",
+        "end_exclusive": "first_date + INTERVAL '90 days'",
+        "observation_end_inclusive": true,
+        "maturity_condition": "first_date + INTERVAL '89 days' <= observation_end"
+      },
+      "allocation_rule": "retention_spend按订单自然月×实际成交渠道订单收入份额分到订单；再按客户首次获客触点分组汇总，不能改为首次渠道的费用直接分摊",
+      "net_comparison_rule": "eligible_90d=new_customers且new_customers>0时允许realized_value_90d-CAC；否则value_minus_cac=NULL",
+      "tables": [
+        "orders",
+        "order_items",
+        "customer_acquisition",
+        "refunds",
+        "shipments",
+        "fulfillment_costs",
+        "marketing_spend"
+      ],
+      "columns": [
+        "customer_id",
+        "order_date",
+        "status",
+        "quantity",
+        "unit_cost",
+        "refund_date",
+        "refund_amount",
+        "retention_spend",
+        "shipping_cost",
+        "payment_fee"
+      ],
+      "dimensions": [],
+      "time_column": "orders.order_date",
+      "grain": "完整90日首购客户队列",
+      "unit": "元/客户",
+      "filters": [
+        "遵循指标描述中的期间、状态和成熟窗口"
+      ],
+      "additivity": "ratio",
+      "denominator": "first_date+89天<=含当日的observation_end的去重客户数；订单和退款只取[day0,day90)"
+    },
+    {
+      "id": "new_existing_contribution",
+      "name": "统计期新老客销售与利润",
+      "aliases": [
+        "统计期新老客销售与利润"
+      ],
+      "expression": "SUM(sales), SUM(contribution_profit)",
+      "description": "新客为2025内首次有效购买客户，其2025所有完成交易均归新客；老客首购早于2025-01-01。按每单贡献公式汇总，不逐月把新客重新分配为老客。",
+      "tables": [
+        "customers",
+        "orders",
+        "order_items",
+        "refunds",
+        "marketing_spend"
+      ],
+      "columns": [
+        "customer_id",
+        "order_date",
+        "order_total",
+        "status",
+        "quantity",
+        "unit_cost",
+        "refund_amount",
+        "spend"
+      ],
+      "dimensions": [],
+      "time_column": "orders.order_date",
+      "grain": "统计期×客户类型",
+      "unit": "元",
+      "filters": [
+        "遵循指标描述中的期间、状态和成熟窗口"
+      ],
+      "additivity": "additive"
+    },
+    {
+      "id": "repurchase_90d",
+      "name": "首购队列90日复购率",
+      "aliases": [
+        "首购队列90日复购率"
+      ],
+      "expression": "repurchased_customers/eligible_customers",
+      "description": "按首购月份分队列，首购日为day0，90日窗口为[0,90)，包含day0至day89、不含day90；至少两笔completed订单判复购。observation_end含该日完整观测，成熟分母条件为first_date+89天<=observation_end。小于30人标低样本，不能把未成熟记未复购。",
+      "tables": [
+        "orders"
+      ],
+      "columns": [
+        "customer_id",
+        "order_id",
+        "order_date",
+        "status"
+      ],
+      "dimensions": [],
+      "time_column": "orders.order_date",
+      "grain": "首购月份客户队列",
+      "unit": "ratio",
+      "filters": [
+        "遵循指标描述中的期间、状态和成熟窗口"
+      ],
+      "additivity": "ratio",
+      "denominator": "first_date+89天<=含当日的observation_end的首购客户数"
+    }
+  ],
+  "examples": [],
+  "business_knowledge": [
+    {
+      "id": "refund-status",
+      "title": "退款申请与成功退款",
+      "content": "退款表的 processing 是处理中，仅 completed 才是已退款；按退款日期衡量当期退款。跨表使用 status 字段必须带表别名。",
+      "tags": [
+        "refund",
+        "status"
+      ]
+    },
+    {
+      "id": "profit-boundary",
+      "title": "毛利不是净利润",
+      "content": "本场景毛利使用交易时单价减交易时成本，不扣推广、退款、物流和人员费用。不要用毛利结果回答净利润；缺少费用数据时说明限制。",
+      "tags": [
+        "profit"
+      ]
+    },
+    {
+      "id": "fanout-risk",
+      "title": "多明细关联的重复统计风险",
+      "content": "订单与商品明细、退款明细均为一对多。在合并销售、退款、推广数据前，各自汇总到公共粒度，再用完整公共维度关联。",
+      "tags": [
+        "join",
+        "refund",
+        "channel"
+      ]
+    },
+    {
+      "id": "attribution-boundary",
+      "title": "贡献利润及观察期边界",
+      "content": "订单队列利润按订单日期归属成功退款与费用，必须具备完整观察期；它不是财务会计权责利润。费用分解可精确勾稽，但不能据此声称活动带来了增量销量。",
+      "tags": [
+        "profit",
+        "refund"
+      ]
+    },
+    {
+      "id": "fulfillment-association",
+      "title": "履约与退款的证据边界",
+      "content": "履约承诺、实际签收和售后原因可用于分组诊断；登记原因及观察关联不能单独证明承运商或供应商的因果责任。",
+      "tags": [
+        "refund",
+        "fulfillment"
+      ]
+    }
+  ],
+  "preferences": [
+    {
+      "id": "channel-view",
+      "title": "默认按渠道展开",
+      "key": "default_dimension",
+      "value": "channel",
+      "description": "问题没有指定分组时，优先按渠道汇总；本次明确维度优先。"
+    },
+    {
+      "id": "profit-first",
+      "title": "优先展示毛利",
+      "key": "priority_metric",
+      "value": "gross_profit",
+      "description": "经营概览优先查看毛利；若需补充该指标，应在查询计划中明确纳入。"
+    },
+    {
+      "id": "money-unit",
+      "title": "金额使用万元",
+      "key": "currency_display_unit",
+      "value": "万",
+      "description": "仅改变展示单位，SQL原值仍为元，图表必须明确单位。"
+    }
+  ],
+  "repair_experiences": [
+    {
+      "id": "ec-grouping",
+      "title": "渠道汇总遗漏分组",
+      "content": "按渠道汇总金额时，非聚合维度必须进入 GROUP BY。不要用任意值函数隐藏维度错误；以用户要求的渠道粒度聚合。",
+      "error_category": "aggregation",
+      "tables": [
+        "orders"
+      ],
+      "fixture_sql": [
+        "CREATE TABLE orders(order_id INTEGER, channel VARCHAR, order_total DOUBLE, status VARCHAR)",
+        "INSERT INTO orders VALUES(1,'自然流量',100,'completed'),(2,'自然流量',200,'completed'),(3,'付费推广',80,'completed')"
+      ],
+      "broken_sql": "SELECT channel,SUM(order_total) FROM orders",
+      "fixed_sql": "SELECT channel,SUM(order_total) FROM orders GROUP BY channel ORDER BY channel",
+      "expected": [
+        [
+          "付费推广",
+          80
+        ],
+        [
+          "自然流量",
+          300
+        ]
+      ]
+    },
+    {
+      "id": "ec-ambiguous-status",
+      "title": "关联后状态列歧义",
+      "content": "订单和退款都有 status 字段，必须限定表别名。退款成功使用退款状态，不能把订单状态作为退款是否完成的判断。",
+      "error_category": "schema",
+      "tables": [
+        "orders",
+        "refunds"
+      ],
+      "fixture_sql": [
+        "CREATE TABLE orders(order_id INTEGER,status VARCHAR)",
+        "CREATE TABLE refunds(order_id INTEGER,status VARCHAR,refund_amount DOUBLE)",
+        "INSERT INTO orders VALUES(1,'completed')",
+        "INSERT INTO refunds VALUES(1,'completed',30),(1,'processing',20)"
+      ],
+      "broken_sql": "SELECT SUM(refund_amount) FROM orders o JOIN refunds r ON o.order_id=r.order_id WHERE status='completed'",
+      "fixed_sql": "SELECT SUM(r.refund_amount) FROM orders o JOIN refunds r ON o.order_id=r.order_id WHERE r.status='completed'",
+      "expected": [
+        [
+          30
+        ]
+      ]
+    },
+    {
+      "id": "ec-fanout",
+      "title": "订单明细与退款关联造成金额翻倍",
+      "content": "订单下有多条退款时，将订单明细直接关联退款会放大销售额。分别按订单聚合销售和成功退款，再以订单键关联；检查合并前后销售总额不变。",
+      "error_category": "semantic",
+      "tables": [
+        "orders",
+        "order_items",
+        "refunds"
+      ],
+      "fixture_sql": [
+        "CREATE TABLE orders(order_id INTEGER)",
+        "CREATE TABLE order_items(order_id INTEGER,quantity INTEGER,unit_price DOUBLE)",
+        "CREATE TABLE refunds(order_id INTEGER,refund_amount DOUBLE,status VARCHAR)",
+        "INSERT INTO orders VALUES(1)",
+        "INSERT INTO order_items VALUES(1,1,100),(1,1,50)",
+        "INSERT INTO refunds VALUES(1,10,'completed'),(1,20,'completed')"
+      ],
+      "broken_sql": "SELECT SUM(i.quantity*i.unit_price) AS sales,SUM(r.refund_amount) AS refunded FROM orders o JOIN order_items i ON o.order_id=i.order_id JOIN refunds r ON o.order_id=r.order_id",
+      "fixed_sql": "WITH s AS(SELECT order_id,SUM(quantity*unit_price) sales FROM order_items GROUP BY order_id),r AS(SELECT order_id,SUM(refund_amount) refunded FROM refunds WHERE status='completed' GROUP BY order_id) SELECT SUM(s.sales) AS sales,SUM(r.refunded) AS refunded FROM orders o JOIN s ON o.order_id=s.order_id JOIN r ON o.order_id=r.order_id",
+      "expected": [
+        [
+          150,
+          30
+        ]
+      ]
+    },
+    {
+      "id": "ec-refund-status",
+      "title": "把处理中退款计入成功退款",
+      "content": "退款金额统计需按正式指标卡筛选成功状态。processing 不代表资金已经退回；SQL可执行也要复核状态与时间口径。",
+      "error_category": "semantic",
+      "tables": [
+        "refunds"
+      ],
+      "fixture_sql": [
+        "CREATE TABLE refunds(refund_id INTEGER,refund_amount DOUBLE,status VARCHAR)",
+        "INSERT INTO refunds VALUES(1,30,'completed'),(2,20,'processing')"
+      ],
+      "broken_sql": "SELECT SUM(refund_amount) FROM refunds",
+      "fixed_sql": "SELECT SUM(refund_amount) FROM refunds WHERE status='completed'",
+      "expected": [
+        [
+          30
+        ]
+      ]
+    }
+  ],
+  "evaluation": [],
+  "clarifications": [
+    {
+      "question": "看看利润变化。",
+      "answer": "按2025年月度毛利分析，不包含退款和营销费用。"
+    },
+    {
+      "question": "退款率是多少？",
+      "answer": "按2025年订单队列，成功退款的订单数除以完成订单数；同一订单多次退款只算一次。"
+    }
+  ],
+  "enterprise": true,
+  "generator": "ecommerce",
+  "synthetic": true,
+  "remove_business_knowledge": [
+    "campaign-context"
+  ],
+  "dimensions": [
+    {
+      "id": "channel",
+      "table": "orders",
+      "column": "channel",
+      "type": "category"
+    },
+    {
+      "id": "product",
+      "table": "products",
+      "column": "product_name",
+      "type": "category",
+      "levels": [
+        "category",
+        "product_name"
+      ]
+    },
+    {
+      "id": "supplier",
+      "table": "suppliers",
+      "column": "supplier_name",
+      "type": "category"
+    },
+    {
+      "id": "carrier",
+      "table": "shipments",
+      "column": "carrier",
+      "type": "category"
+    }
+  ],
+  "capabilities": [
+    "profit_bridge",
+    "refund_diagnosis",
+    "cohort_filter",
+    "cross_fact_aggregation",
+    "period_overview",
+    "grouped_profit_change",
+    "customer_value_90d",
+    "customer_repeat_cohort"
+  ],
+  "diagnostics": [
+    {
+      "id": "period-overview",
+      "title": "期间销售、订单、客单与贡献变化",
+      "tags": [
+        "trend",
+        "profit",
+        "overview"
+      ],
+      "tool": "period_overview",
+      "supported_query_types": ["trend","aggregate"],
+      "period_policy": "all",
+      "description": "单一报告范围的连续月度经营概览：完整保留该范围所有月份，计算销售额、有效订单量、客单价和贡献利润趋势及年度汇总。适用于‘2025各月如何变化’，不需要按渠道/品类的两期利润归因，不能把全年首末月误作只查两期。",
+      "queries": [
+        {
+          "id": "period_overview_input",
+          "sql": "WITH l AS(SELECT i.order_id,SUM(i.quantity*p.list_price) gross_sales,SUM(i.quantity*i.unit_cost) cogs FROM order_items i JOIN products p ON i.product_id=p.product_id GROUP BY i.order_id),\nf AS(SELECT h.order_id,SUM(f.shipping_cost) fulfillment,SUM(f.payment_fee) payment_fees FROM shipments h JOIN fulfillment_costs f ON h.shipment_id=f.shipment_id GROUP BY h.order_id),\nr AS(SELECT r.order_id,SUM(r.refund_amount) refunds FROM refunds r JOIN orders o ON r.order_id=o.order_id WHERE r.status='completed' AND r.refund_date>=o.order_date AND r.refund_date<=o.order_date+INTERVAL '30 days' AND r.refund_date<=DATE '2026-03-31' GROUP BY r.order_id),\nd AS(SELECT order_month,channel,SUM(order_total) month_sales FROM orders WHERE status='completed' GROUP BY order_month,channel),\nm AS(SELECT month_start,channel,SUM(spend) spend,SUM(retention_spend) retention_spend FROM marketing_spend GROUP BY month_start,channel),\nfinancials AS(SELECT o.order_id,o.customer_id,o.order_date,o.channel,o.order_total sales,l.gross_sales,l.gross_sales-o.order_total discounts,l.cogs,COALESCE(r.refunds,0) refunds,COALESCE(f.fulfillment,0) fulfillment,COALESCE(f.payment_fees,0) payment_fees,\nCOALESCE(m.spend*o.order_total/NULLIF(d.month_sales,0),0) marketing,COALESCE(m.retention_spend*o.order_total/NULLIF(d.month_sales,0),0) retention_marketing\nFROM orders o JOIN l ON o.order_id=l.order_id LEFT JOIN f ON o.order_id=f.order_id LEFT JOIN r ON o.order_id=r.order_id JOIN d ON o.order_month=d.order_month AND o.channel=d.channel LEFT JOIN m ON o.order_month=m.month_start AND o.channel=m.channel WHERE o.status='completed') SELECT strftime(order_date,'%Y-%m') period,COUNT(*) orders,SUM(sales) sales,SUM(gross_sales) gross_sales,SUM(discounts) discounts,SUM(refunds) refunds,SUM(cogs) cogs,SUM(fulfillment) fulfillment,SUM(payment_fees) payment_fees,SUM(marketing) marketing,SUM(sales-cogs-refunds-fulfillment-payment_fees-marketing) contribution_profit FROM financials WHERE order_date>=DATE '2025-01-01' AND order_date<DATE '2026-01-01' GROUP BY 1 ORDER BY 1",
+          "metric_ids": [
+            "sales",
+            "order_count",
+            "aov",
+            "contribution_profit"
+          ]
+        }
+      ],
+      "config": {
+        "query_id": "period_overview_input"
+      }
+    },
+    {
+      "id": "grouped-profit-change",
+      "title": "渠道与品类费用分摊及利润变动",
+      "tags": [
+        "profit",
+        "comparison",
+        "contribution"
+      ],
+      "tool": "grouped_profit_change",
+      "supported_query_types": ["comparison"],
+      "period_policy": "pair",
+      "description": "仅用于用户明确比较两个期间并要求利润成因拆分（如Q4相对Q3）：按渠道与品类的折前额、折扣、退款、成交成本、履约、支付和营销费用做可还原差额桥接。不用于单纯每月经营概览。",
+      "queries": [
+        {
+          "id": "grouped_profit_change_input",
+          "sql": "WITH l AS(SELECT i.order_id,SUM(i.quantity*p.list_price) gross_sales,SUM(i.quantity*i.unit_cost) cogs FROM order_items i JOIN products p ON i.product_id=p.product_id GROUP BY i.order_id),\nf AS(SELECT h.order_id,SUM(f.shipping_cost) fulfillment,SUM(f.payment_fee) payment_fees FROM shipments h JOIN fulfillment_costs f ON h.shipment_id=f.shipment_id GROUP BY h.order_id),\nr AS(SELECT r.order_id,SUM(r.refund_amount) refunds FROM refunds r JOIN orders o ON r.order_id=o.order_id WHERE r.status='completed' AND r.refund_date>=o.order_date AND r.refund_date<=o.order_date+INTERVAL '30 days' AND r.refund_date<=DATE '2026-03-31' GROUP BY r.order_id),\nd AS(SELECT order_month,channel,SUM(order_total) month_sales FROM orders WHERE status='completed' GROUP BY order_month,channel),\nm AS(SELECT month_start,channel,SUM(spend) spend,SUM(retention_spend) retention_spend FROM marketing_spend GROUP BY month_start,channel),\nfinancials AS(SELECT o.order_id,o.customer_id,o.order_date,o.channel,o.order_total sales,l.gross_sales,l.gross_sales-o.order_total discounts,l.cogs,COALESCE(r.refunds,0) refunds,COALESCE(f.fulfillment,0) fulfillment,COALESCE(f.payment_fees,0) payment_fees,\nCOALESCE(m.spend*o.order_total/NULLIF(d.month_sales,0),0) marketing,COALESCE(m.retention_spend*o.order_total/NULLIF(d.month_sales,0),0) retention_marketing\nFROM orders o JOIN l ON o.order_id=l.order_id LEFT JOIN f ON o.order_id=f.order_id LEFT JOIN r ON o.order_id=r.order_id JOIN d ON o.order_month=d.order_month AND o.channel=d.channel LEFT JOIN m ON o.order_month=m.month_start AND o.channel=m.channel WHERE o.status='completed'),category_lines AS(SELECT i.order_id,p.category,SUM(i.quantity*p.list_price) category_gross,SUM(i.quantity*i.unit_cost) category_cogs FROM order_items i JOIN products p ON i.product_id=p.product_id GROUP BY i.order_id,p.category)\nSELECT CASE WHEN f.order_date<DATE '2025-10-01' THEN '2025-Q3' ELSE '2025-Q4' END period,f.channel,c.category,\nSUM(c.category_gross) gross_sales,SUM(f.discounts*c.category_gross/f.gross_sales) discounts,SUM(f.refunds*c.category_gross/f.gross_sales) refunds,SUM(c.category_cogs) cogs,\nSUM(f.fulfillment*c.category_gross/f.gross_sales) fulfillment,SUM(f.payment_fees*c.category_gross/f.gross_sales) payment_fees,SUM(f.marketing*c.category_gross/f.gross_sales) marketing\nFROM financials f JOIN category_lines c ON f.order_id=c.order_id WHERE f.order_date>=DATE '2025-07-01' AND f.order_date<DATE '2026-01-01' GROUP BY 1,2,3 ORDER BY 1,2,3",
+          "metric_ids": [
+            "sales",
+            "contribution_profit"
+          ]
+        }
+      ],
+      "config": {
+        "query_id": "grouped_profit_change_input"
+      }
+    },
+    {
+      "id": "customer-value-90d",
+      "title": "首次触点CAC与90日已实现客户贡献",
+      "tags": [
+        "customer",
+        "acquisition",
+        "cac",
+        "value"
+      ],
+      "tool": "customer_value_90d",
+      "supported_query_types": ["comparison","aggregate","ranking"],
+      "period_policy": "all",
+      "description": "比较首次获客渠道的期间拉新投入、首购新客数、CAC与完整90日已实现贡献。[day0,day90)成熟条件是first_date+89天<=含当日的观察截止日。留存费用先按订单月×成交渠道收入分摊，再归客户并按首次获客渠道分组；两层归因不冲突。全部新客成熟且分母>0时允许90日贡献减CAC作为已实现净差额，非LTV或因果收益；不用于普通月度销售概览。",
+      "queries": [
+        {
+          "id": "customer_value_90d_input",
+          "sql": "WITH l AS(SELECT i.order_id,SUM(i.quantity*p.list_price) gross_sales,SUM(i.quantity*i.unit_cost) cogs FROM order_items i JOIN products p ON i.product_id=p.product_id GROUP BY i.order_id),\nf AS(SELECT h.order_id,SUM(f.shipping_cost) fulfillment,SUM(f.payment_fee) payment_fees FROM shipments h JOIN fulfillment_costs f ON h.shipment_id=f.shipment_id GROUP BY h.order_id),\nr AS(SELECT r.order_id,SUM(r.refund_amount) refunds FROM refunds r JOIN orders o ON r.order_id=o.order_id WHERE r.status='completed' AND r.refund_date>=o.order_date AND r.refund_date<=o.order_date+INTERVAL '30 days' AND r.refund_date<=DATE '2026-03-31' GROUP BY r.order_id),\nd AS(SELECT order_month,channel,SUM(order_total) month_sales FROM orders WHERE status='completed' GROUP BY order_month,channel),\nm AS(SELECT month_start,channel,SUM(spend) spend,SUM(retention_spend) retention_spend FROM marketing_spend GROUP BY month_start,channel),\nfinancials AS(SELECT o.order_id,o.customer_id,o.order_date,o.channel,o.order_total sales,l.gross_sales,l.gross_sales-o.order_total discounts,l.cogs,COALESCE(r.refunds,0) refunds,COALESCE(f.fulfillment,0) fulfillment,COALESCE(f.payment_fees,0) payment_fees,\nCOALESCE(m.spend*o.order_total/NULLIF(d.month_sales,0),0) marketing,COALESCE(m.retention_spend*o.order_total/NULLIF(d.month_sales,0),0) retention_marketing\nFROM orders o JOIN l ON o.order_id=l.order_id LEFT JOIN f ON o.order_id=f.order_id LEFT JOIN r ON o.order_id=r.order_id JOIN d ON o.order_month=d.order_month AND o.channel=d.channel LEFT JOIN m ON o.order_month=m.month_start AND o.channel=m.channel WHERE o.status='completed'),first_purchase AS(SELECT customer_id,MIN(order_date) first_date FROM orders WHERE status='completed' GROUP BY customer_id),\nvalue90 AS(SELECT f.customer_id,SUM(f.sales) sales_90d,SUM(f.sales-f.cogs-f.fulfillment-f.payment_fees-f.retention_marketing) before_refund_90d FROM financials f JOIN first_purchase p ON f.customer_id=p.customer_id WHERE f.order_date>=p.first_date AND f.order_date<p.first_date+INTERVAL '90 days' GROUP BY f.customer_id),\nrefund90 AS(SELECT o.customer_id,SUM(r.refund_amount) refund_90d FROM refunds r JOIN orders o ON r.order_id=o.order_id JOIN first_purchase p ON o.customer_id=p.customer_id WHERE o.status='completed' AND r.status='completed' AND o.order_date>=p.first_date AND o.order_date<p.first_date+INTERVAL '90 days' AND r.refund_date>=p.first_date AND r.refund_date<p.first_date+INTERVAL '90 days' GROUP BY o.customer_id),\ncohort AS(SELECT a.acquisition_channel channel,COUNT(*) new_customers,COUNT(*) FILTER(WHERE p.first_date+INTERVAL '89 days'<=DATE '2026-03-31') eligible_90d,\nSUM(CASE WHEN p.first_date+INTERVAL '89 days'<=DATE '2026-03-31' THEN v.sales_90d ELSE 0 END) sales_90d,\nSUM(CASE WHEN p.first_date+INTERVAL '89 days'<=DATE '2026-03-31' THEN v.before_refund_90d-COALESCE(r.refund_90d,0) ELSE 0 END) realized_90d_contribution_before_acquisition\nFROM customer_acquisition a JOIN first_purchase p ON a.customer_id=p.customer_id JOIN value90 v ON a.customer_id=v.customer_id LEFT JOIN refund90 r ON a.customer_id=r.customer_id\nWHERE p.first_date>=DATE '2025-01-01' AND p.first_date<DATE '2026-01-01' GROUP BY a.acquisition_channel),\nspend AS(SELECT channel,SUM(acquisition_spend) acquisition_spend FROM marketing_spend WHERE spend_date>=DATE '2025-01-01' AND spend_date<DATE '2026-01-01' GROUP BY channel)\nSELECT s.channel,COALESCE(c.new_customers,0) new_customers,COALESCE(c.eligible_90d,0) eligible_90d,COALESCE(c.sales_90d,0) sales_90d,COALESCE(c.realized_90d_contribution_before_acquisition,0) realized_90d_contribution_before_acquisition,s.acquisition_spend FROM spend s LEFT JOIN cohort c ON c.channel=s.channel ORDER BY s.channel",
+          "metric_ids": [
+            "first_touch_cac",
+            "realized_value_90d"
+          ]
+        }
+      ],
+      "config": {
+        "query_id": "customer_value_90d_input"
+      }
+    },
+    {
+      "id": "refund-fulfillment",
+      "title": "成熟订单退款与履约、商品批次诊断",
+      "tags": [
+        "refund",
+        "fulfillment"
+      ],
+      "tool": "refund_diagnosis",
+      "queries": [
+        {
+          "id": "refund_input",
+          "sql": "WITH h AS(SELECT order_id,COUNT(*) packages,COUNT(*) FILTER(WHERE promised_date IS NOT NULL AND delivered_date IS NOT NULL AND delivered_date<=DATE '2026-03-31') signed_packages,MAX(CASE WHEN delivered_date>promised_date THEN 1 ELSE 0 END) is_late FROM shipments GROUP BY order_id),c AS(SELECT o.order_id,o.order_date,o.channel,CASE WHEN h.packages>0 AND h.signed_packages=h.packages THEN 1 ELSE 0 END known_fulfillment,COALESCE(h.is_late,0) is_late FROM orders o LEFT JOIN h ON o.order_id=h.order_id WHERE o.status='completed' AND o.order_date>=DATE '2025-10-01' AND o.order_date<DATE '2026-01-01' AND o.order_date+INTERVAL '30 days'<=DATE '2026-03-31'),r AS(SELECT r.order_id,COUNT(*) successful_refunds FROM refunds r JOIN c ON r.order_id=c.order_id WHERE r.status='completed' AND r.refund_date>=c.order_date AND r.refund_date<=c.order_date+INTERVAL '30 days' GROUP BY r.order_id) SELECT c.channel AS \"group\",COUNT(*) FILTER(WHERE c.known_fulfillment=1) orders,COUNT(*) FILTER(WHERE c.known_fulfillment=1 AND r.successful_refunds>0) refunded_orders,COUNT(*) FILTER(WHERE c.known_fulfillment=1 AND c.is_late=1) late_orders,COUNT(*) FILTER(WHERE c.known_fulfillment=1 AND c.is_late=1 AND r.successful_refunds>0) late_refunded_orders,COUNT(*) mature_orders,COUNT(*) FILTER(WHERE c.known_fulfillment=0) unknown_fulfillment_orders FROM c LEFT JOIN r ON c.order_id=r.order_id GROUP BY c.channel ORDER BY c.channel",
+          "metric_ids": [
+            "delivered_cohort_refund_rate",
+            "delivered_order_late_rate"
+          ]
+        },
+        {
+          "id": "refund_reasons",
+          "sql": "WITH h AS(SELECT order_id,COUNT(*) packages,COUNT(*) FILTER(WHERE promised_date IS NOT NULL AND delivered_date IS NOT NULL AND delivered_date<=DATE '2026-03-31') signed_packages,MAX(CASE WHEN delivered_date>promised_date THEN 1 ELSE 0 END) is_late FROM shipments GROUP BY order_id),c AS(SELECT o.order_id,o.order_date,o.channel,CASE WHEN h.packages>0 AND h.signed_packages=h.packages THEN 1 ELSE 0 END known_fulfillment,COALESCE(h.is_late,0) is_late FROM orders o LEFT JOIN h ON o.order_id=h.order_id WHERE o.status='completed' AND o.order_date>=DATE '2025-10-01' AND o.order_date<DATE '2026-01-01' AND o.order_date+INTERVAL '30 days'<=DATE '2026-03-31'),reason_by_refund AS(SELECT refund_id,CASE WHEN COUNT(DISTINCT reason)=1 THEN MIN(reason) WHEN COUNT(DISTINCT reason)>1 THEN '多原因' ELSE '未记录' END reason FROM return_cases GROUP BY refund_id),labels AS(SELECT ib.item_id,CASE WHEN COUNT(DISTINCT s.supplier_id)=1 THEN MIN(s.supplier_name) WHEN COUNT(DISTINCT s.supplier_id)>1 THEN '多供应商' ELSE '未记录' END supplier_name,CASE WHEN COUNT(DISTINCT p.product_id)=1 THEN MIN(p.product_name) WHEN COUNT(DISTINCT p.product_id)>1 THEN '多商品' ELSE '未记录' END product_name FROM order_item_batches ib LEFT JOIN product_batches b ON ib.batch_id=b.batch_id LEFT JOIN suppliers s ON b.supplier_id=s.supplier_id LEFT JOIN products p ON b.product_id=p.product_id GROUP BY ib.item_id) SELECT c.channel,COALESCE(l.supplier_name,'未记录') supplier_name,COALESCE(l.product_name,'未记录') product_name,COALESCE(a.reason,'未记录') reason,COUNT(DISTINCT r.order_id) refunded_orders,SUM(r.refund_amount) refunded_amount FROM c JOIN refunds r ON c.order_id=r.order_id LEFT JOIN reason_by_refund a ON r.refund_id=a.refund_id LEFT JOIN labels l ON r.item_id=l.item_id WHERE c.known_fulfillment=1 AND r.status='completed' AND r.refund_date>=c.order_date AND r.refund_date<=c.order_date+INTERVAL '30 days' GROUP BY 1,2,3,4 ORDER BY refunded_amount DESC,1,2,3,4",
+          "metric_ids": [
+            "delivered_cohort_refund_amount"
+          ],
+          "non_additive_columns": [
+            "refunded_orders"
+          ]
+        }
+      ],
+      "config": {
+        "query_id": "refund_input",
+        "detail_query_id": "refund_reasons"
+      },
+      "supported_query_types": ["comparison","aggregate","ranking"],
+      "period_policy": "all",
+      "description": "成熟完成订单队列中的退款集中度及履约延迟关联：包裹先归订单，成功退款去重，商品/供应商/原因用互斥退款金额分布；已知签收队列比较延迟与非延迟退款率，未知履约单独披露。跨原因去重订单数不可相加作饼图。"
+    },
+    {
+      "id": "customer-repeat-cohort",
+      "title": "新老客贡献与首购队列复购",
+      "tags": [
+        "customer",
+        "retention",
+        "repurchase"
+      ],
+      "tool": "customer_repeat_cohort",
+      "supported_query_types": ["comparison","trend","aggregate"],
+      "period_policy": "all",
+      "description": "固定统计期内按历史首购日期划分新老客，并把该期所有交易归属对应客户群；比较销售与贡献利润，同时按首购月份计算完整90日复购。适用于新老客及复购队列，不用于普通销售月报。",
+      "queries": [
+        {
+          "id": "customer_repeat_cohort_input",
+          "sql": "WITH l AS(SELECT i.order_id,SUM(i.quantity*p.list_price) gross_sales,SUM(i.quantity*i.unit_cost) cogs FROM order_items i JOIN products p ON i.product_id=p.product_id GROUP BY i.order_id),\nf AS(SELECT h.order_id,SUM(f.shipping_cost) fulfillment,SUM(f.payment_fee) payment_fees FROM shipments h JOIN fulfillment_costs f ON h.shipment_id=f.shipment_id GROUP BY h.order_id),\nr AS(SELECT r.order_id,SUM(r.refund_amount) refunds FROM refunds r JOIN orders o ON r.order_id=o.order_id WHERE r.status='completed' AND r.refund_date>=o.order_date AND r.refund_date<=o.order_date+INTERVAL '30 days' AND r.refund_date<=DATE '2026-03-31' GROUP BY r.order_id),\nd AS(SELECT order_month,channel,SUM(order_total) month_sales FROM orders WHERE status='completed' GROUP BY order_month,channel),\nm AS(SELECT month_start,channel,SUM(spend) spend,SUM(retention_spend) retention_spend FROM marketing_spend GROUP BY month_start,channel),\nfinancials AS(SELECT o.order_id,o.customer_id,o.order_date,o.channel,o.order_total sales,l.gross_sales,l.gross_sales-o.order_total discounts,l.cogs,COALESCE(r.refunds,0) refunds,COALESCE(f.fulfillment,0) fulfillment,COALESCE(f.payment_fees,0) payment_fees,\nCOALESCE(m.spend*o.order_total/NULLIF(d.month_sales,0),0) marketing,COALESCE(m.retention_spend*o.order_total/NULLIF(d.month_sales,0),0) retention_marketing\nFROM orders o JOIN l ON o.order_id=l.order_id LEFT JOIN f ON o.order_id=f.order_id LEFT JOIN r ON o.order_id=r.order_id JOIN d ON o.order_month=d.order_month AND o.channel=d.channel LEFT JOIN m ON o.order_month=m.month_start AND o.channel=m.channel WHERE o.status='completed'),first_purchase AS(SELECT customer_id,MIN(order_date) first_date FROM orders WHERE status='completed' GROUP BY customer_id),\nreport AS(SELECT customer_id,SUM(sales) sales,SUM(sales-cogs-refunds-fulfillment-payment_fees-marketing) contribution_profit FROM financials WHERE order_date>=DATE '2025-01-01' AND order_date<DATE '2026-01-01' GROUP BY customer_id),\nrepeat90 AS(SELECT o.customer_id,COUNT(*) orders_90d FROM orders o JOIN first_purchase p ON o.customer_id=p.customer_id WHERE o.status='completed' AND o.order_date>=p.first_date AND o.order_date<p.first_date+INTERVAL '90 days' GROUP BY o.customer_id)\nSELECT p.customer_id,p.first_date,CASE WHEN p.first_date>=DATE '2025-01-01' THEN 'new' ELSE 'existing' END customer_kind,COALESCE(r.sales,0) sales,COALESCE(r.contribution_profit,0) contribution_profit,\nCASE WHEN p.first_date+INTERVAL '89 days'<=DATE '2026-03-31' THEN 1 ELSE 0 END eligible_90d,CASE WHEN z.orders_90d>=2 THEN 1 ELSE 0 END repurchased_90d\nFROM first_purchase p LEFT JOIN report r ON p.customer_id=r.customer_id LEFT JOIN repeat90 z ON p.customer_id=z.customer_id WHERE p.first_date<DATE '2026-01-01' ORDER BY p.customer_id",
+          "metric_ids": [
+            "new_existing_contribution",
+            "repurchase_90d"
+          ]
+        }
+      ],
+      "config": {
+        "query_id": "customer_repeat_cohort_input"
+      }
+    }
+  ],
+  "dashboard_templates": [
+    {
+      "id": "ecommerce-light-bi",
+      "title": "电商经营经营工作台",
+      "cards": [
+        {
+          "id": "period-overview",
+          "title": "期间销售、订单、客单与贡献变化",
+          "query": {
+            "id": "period_overview_input",
+            "sql": "WITH l AS(SELECT i.order_id,SUM(i.quantity*p.list_price) gross_sales,SUM(i.quantity*i.unit_cost) cogs FROM order_items i JOIN products p ON i.product_id=p.product_id GROUP BY i.order_id),\nf AS(SELECT h.order_id,SUM(f.shipping_cost) fulfillment,SUM(f.payment_fee) payment_fees FROM shipments h JOIN fulfillment_costs f ON h.shipment_id=f.shipment_id GROUP BY h.order_id),\nr AS(SELECT r.order_id,SUM(r.refund_amount) refunds FROM refunds r JOIN orders o ON r.order_id=o.order_id WHERE r.status='completed' AND r.refund_date>=o.order_date AND r.refund_date<=o.order_date+INTERVAL '30 days' AND r.refund_date<=DATE '2026-03-31' GROUP BY r.order_id),\nd AS(SELECT order_month,channel,SUM(order_total) month_sales FROM orders WHERE status='completed' GROUP BY order_month,channel),\nm AS(SELECT month_start,channel,SUM(spend) spend,SUM(retention_spend) retention_spend FROM marketing_spend GROUP BY month_start,channel),\nfinancials AS(SELECT o.order_id,o.customer_id,o.order_date,o.channel,o.order_total sales,l.gross_sales,l.gross_sales-o.order_total discounts,l.cogs,COALESCE(r.refunds,0) refunds,COALESCE(f.fulfillment,0) fulfillment,COALESCE(f.payment_fees,0) payment_fees,\nCOALESCE(m.spend*o.order_total/NULLIF(d.month_sales,0),0) marketing,COALESCE(m.retention_spend*o.order_total/NULLIF(d.month_sales,0),0) retention_marketing\nFROM orders o JOIN l ON o.order_id=l.order_id LEFT JOIN f ON o.order_id=f.order_id LEFT JOIN r ON o.order_id=r.order_id JOIN d ON o.order_month=d.order_month AND o.channel=d.channel LEFT JOIN m ON o.order_month=m.month_start AND o.channel=m.channel WHERE o.status='completed') SELECT strftime(order_date,'%Y-%m') period,COUNT(*) orders,SUM(sales) sales,SUM(gross_sales) gross_sales,SUM(discounts) discounts,SUM(refunds) refunds,SUM(cogs) cogs,SUM(fulfillment) fulfillment,SUM(payment_fees) payment_fees,SUM(marketing) marketing,SUM(sales-cogs-refunds-fulfillment-payment_fees-marketing) contribution_profit FROM financials WHERE order_date>=DATE '2025-01-01' AND order_date<DATE '2026-01-01' GROUP BY 1 ORDER BY 1",
+            "metric_ids": [
+              "sales",
+              "order_count",
+              "aov",
+              "contribution_profit"
+            ],
+            "filter_bindings": {}
+          },
+          "analysis_recipe": {
+            "tool": "period_overview",
+            "config": {
+              "query_id": "period_overview_input"
+            }
+          },
+          "chart": {
+            "type": "table"
+          },
+          "layout": {
+            "width": 12,
+            "order": 0
+          }
+        },
+        {
+          "id": "grouped-profit-change",
+          "title": "渠道与品类费用分摊及利润变动",
+          "query": {
+            "id": "grouped_profit_change_input",
+            "sql": "WITH l AS(SELECT i.order_id,SUM(i.quantity*p.list_price) gross_sales,SUM(i.quantity*i.unit_cost) cogs FROM order_items i JOIN products p ON i.product_id=p.product_id GROUP BY i.order_id),\nf AS(SELECT h.order_id,SUM(f.shipping_cost) fulfillment,SUM(f.payment_fee) payment_fees FROM shipments h JOIN fulfillment_costs f ON h.shipment_id=f.shipment_id GROUP BY h.order_id),\nr AS(SELECT r.order_id,SUM(r.refund_amount) refunds FROM refunds r JOIN orders o ON r.order_id=o.order_id WHERE r.status='completed' AND r.refund_date>=o.order_date AND r.refund_date<=o.order_date+INTERVAL '30 days' AND r.refund_date<=DATE '2026-03-31' GROUP BY r.order_id),\nd AS(SELECT order_month,channel,SUM(order_total) month_sales FROM orders WHERE status='completed' GROUP BY order_month,channel),\nm AS(SELECT month_start,channel,SUM(spend) spend,SUM(retention_spend) retention_spend FROM marketing_spend GROUP BY month_start,channel),\nfinancials AS(SELECT o.order_id,o.customer_id,o.order_date,o.channel,o.order_total sales,l.gross_sales,l.gross_sales-o.order_total discounts,l.cogs,COALESCE(r.refunds,0) refunds,COALESCE(f.fulfillment,0) fulfillment,COALESCE(f.payment_fees,0) payment_fees,\nCOALESCE(m.spend*o.order_total/NULLIF(d.month_sales,0),0) marketing,COALESCE(m.retention_spend*o.order_total/NULLIF(d.month_sales,0),0) retention_marketing\nFROM orders o JOIN l ON o.order_id=l.order_id LEFT JOIN f ON o.order_id=f.order_id LEFT JOIN r ON o.order_id=r.order_id JOIN d ON o.order_month=d.order_month AND o.channel=d.channel LEFT JOIN m ON o.order_month=m.month_start AND o.channel=m.channel WHERE o.status='completed'),category_lines AS(SELECT i.order_id,p.category,SUM(i.quantity*p.list_price) category_gross,SUM(i.quantity*i.unit_cost) category_cogs FROM order_items i JOIN products p ON i.product_id=p.product_id GROUP BY i.order_id,p.category)\nSELECT CASE WHEN f.order_date<DATE '2025-10-01' THEN '2025-Q3' ELSE '2025-Q4' END period,f.channel,c.category,\nSUM(c.category_gross) gross_sales,SUM(f.discounts*c.category_gross/f.gross_sales) discounts,SUM(f.refunds*c.category_gross/f.gross_sales) refunds,SUM(c.category_cogs) cogs,\nSUM(f.fulfillment*c.category_gross/f.gross_sales) fulfillment,SUM(f.payment_fees*c.category_gross/f.gross_sales) payment_fees,SUM(f.marketing*c.category_gross/f.gross_sales) marketing\nFROM financials f JOIN category_lines c ON f.order_id=c.order_id WHERE f.order_date>=DATE '2025-07-01' AND f.order_date<DATE '2026-01-01' GROUP BY 1,2,3 ORDER BY 1,2,3",
+            "metric_ids": [
+              "sales",
+              "contribution_profit"
+            ],
+            "filter_bindings": {}
+          },
+          "analysis_recipe": {
+            "tool": "grouped_profit_change",
+            "config": {
+              "query_id": "grouped_profit_change_input"
+            }
+          },
+          "chart": {
+            "type": "table"
+          },
+          "layout": {
+            "width": 12,
+            "order": 1
+          }
+        },
+        {
+          "id": "customer-value-90d",
+          "title": "首次触点CAC与90日已实现客户贡献",
+          "query": {
+            "id": "customer_value_90d_input",
+            "sql": "WITH l AS(SELECT i.order_id,SUM(i.quantity*p.list_price) gross_sales,SUM(i.quantity*i.unit_cost) cogs FROM order_items i JOIN products p ON i.product_id=p.product_id GROUP BY i.order_id),\nf AS(SELECT h.order_id,SUM(f.shipping_cost) fulfillment,SUM(f.payment_fee) payment_fees FROM shipments h JOIN fulfillment_costs f ON h.shipment_id=f.shipment_id GROUP BY h.order_id),\nr AS(SELECT r.order_id,SUM(r.refund_amount) refunds FROM refunds r JOIN orders o ON r.order_id=o.order_id WHERE r.status='completed' AND r.refund_date>=o.order_date AND r.refund_date<=o.order_date+INTERVAL '30 days' AND r.refund_date<=DATE '2026-03-31' GROUP BY r.order_id),\nd AS(SELECT order_month,channel,SUM(order_total) month_sales FROM orders WHERE status='completed' GROUP BY order_month,channel),\nm AS(SELECT month_start,channel,SUM(spend) spend,SUM(retention_spend) retention_spend FROM marketing_spend GROUP BY month_start,channel),\nfinancials AS(SELECT o.order_id,o.customer_id,o.order_date,o.channel,o.order_total sales,l.gross_sales,l.gross_sales-o.order_total discounts,l.cogs,COALESCE(r.refunds,0) refunds,COALESCE(f.fulfillment,0) fulfillment,COALESCE(f.payment_fees,0) payment_fees,\nCOALESCE(m.spend*o.order_total/NULLIF(d.month_sales,0),0) marketing,COALESCE(m.retention_spend*o.order_total/NULLIF(d.month_sales,0),0) retention_marketing\nFROM orders o JOIN l ON o.order_id=l.order_id LEFT JOIN f ON o.order_id=f.order_id LEFT JOIN r ON o.order_id=r.order_id JOIN d ON o.order_month=d.order_month AND o.channel=d.channel LEFT JOIN m ON o.order_month=m.month_start AND o.channel=m.channel WHERE o.status='completed'),first_purchase AS(SELECT customer_id,MIN(order_date) first_date FROM orders WHERE status='completed' GROUP BY customer_id),\nvalue90 AS(SELECT f.customer_id,SUM(f.sales) sales_90d,SUM(f.sales-f.cogs-f.fulfillment-f.payment_fees-f.retention_marketing) before_refund_90d FROM financials f JOIN first_purchase p ON f.customer_id=p.customer_id WHERE f.order_date>=p.first_date AND f.order_date<p.first_date+INTERVAL '90 days' GROUP BY f.customer_id),\nrefund90 AS(SELECT o.customer_id,SUM(r.refund_amount) refund_90d FROM refunds r JOIN orders o ON r.order_id=o.order_id JOIN first_purchase p ON o.customer_id=p.customer_id WHERE o.status='completed' AND r.status='completed' AND o.order_date>=p.first_date AND o.order_date<p.first_date+INTERVAL '90 days' AND r.refund_date>=p.first_date AND r.refund_date<p.first_date+INTERVAL '90 days' GROUP BY o.customer_id),\ncohort AS(SELECT a.acquisition_channel channel,COUNT(*) new_customers,COUNT(*) FILTER(WHERE p.first_date+INTERVAL '89 days'<=DATE '2026-03-31') eligible_90d,\nSUM(CASE WHEN p.first_date+INTERVAL '89 days'<=DATE '2026-03-31' THEN v.sales_90d ELSE 0 END) sales_90d,\nSUM(CASE WHEN p.first_date+INTERVAL '89 days'<=DATE '2026-03-31' THEN v.before_refund_90d-COALESCE(r.refund_90d,0) ELSE 0 END) realized_90d_contribution_before_acquisition\nFROM customer_acquisition a JOIN first_purchase p ON a.customer_id=p.customer_id JOIN value90 v ON a.customer_id=v.customer_id LEFT JOIN refund90 r ON a.customer_id=r.customer_id\nWHERE p.first_date>=DATE '2025-01-01' AND p.first_date<DATE '2026-01-01' GROUP BY a.acquisition_channel),\nspend AS(SELECT channel,SUM(acquisition_spend) acquisition_spend FROM marketing_spend WHERE spend_date>=DATE '2025-01-01' AND spend_date<DATE '2026-01-01' GROUP BY channel)\nSELECT s.channel,COALESCE(c.new_customers,0) new_customers,COALESCE(c.eligible_90d,0) eligible_90d,COALESCE(c.sales_90d,0) sales_90d,COALESCE(c.realized_90d_contribution_before_acquisition,0) realized_90d_contribution_before_acquisition,s.acquisition_spend FROM spend s LEFT JOIN cohort c ON c.channel=s.channel ORDER BY s.channel",
+            "metric_ids": [
+              "first_touch_cac",
+              "realized_value_90d"
+            ],
+            "filter_bindings": {}
+          },
+          "analysis_recipe": {
+            "tool": "customer_value_90d",
+            "config": {
+              "query_id": "customer_value_90d_input"
+            }
+          },
+          "chart": {
+            "type": "table"
+          },
+          "layout": {
+            "width": 12,
+            "order": 2
+          }
+        },
+        {
+          "id": "refund-fulfillment",
+          "title": "成熟订单退款与履约、商品批次诊断",
+          "query": {
+            "id": "refund_input",
+            "sql": "WITH h AS(SELECT order_id,COUNT(*) packages,COUNT(*) FILTER(WHERE promised_date IS NOT NULL AND delivered_date IS NOT NULL AND delivered_date<=DATE '2026-03-31') signed_packages,MAX(CASE WHEN delivered_date>promised_date THEN 1 ELSE 0 END) is_late FROM shipments GROUP BY order_id),c AS(SELECT o.order_id,o.order_date,o.channel,CASE WHEN h.packages>0 AND h.signed_packages=h.packages THEN 1 ELSE 0 END known_fulfillment,COALESCE(h.is_late,0) is_late FROM orders o LEFT JOIN h ON o.order_id=h.order_id WHERE o.status='completed' AND o.order_date>=DATE '2025-10-01' AND o.order_date<DATE '2026-01-01' AND o.order_date+INTERVAL '30 days'<=DATE '2026-03-31'),r AS(SELECT r.order_id,COUNT(*) successful_refunds FROM refunds r JOIN c ON r.order_id=c.order_id WHERE r.status='completed' AND r.refund_date>=c.order_date AND r.refund_date<=c.order_date+INTERVAL '30 days' GROUP BY r.order_id) SELECT c.channel AS \"group\",COUNT(*) FILTER(WHERE c.known_fulfillment=1) orders,COUNT(*) FILTER(WHERE c.known_fulfillment=1 AND r.successful_refunds>0) refunded_orders,COUNT(*) FILTER(WHERE c.known_fulfillment=1 AND c.is_late=1) late_orders,COUNT(*) FILTER(WHERE c.known_fulfillment=1 AND c.is_late=1 AND r.successful_refunds>0) late_refunded_orders,COUNT(*) mature_orders,COUNT(*) FILTER(WHERE c.known_fulfillment=0) unknown_fulfillment_orders FROM c LEFT JOIN r ON c.order_id=r.order_id GROUP BY c.channel ORDER BY c.channel",
+            "metric_ids": [
+              "delivered_cohort_refund_rate",
+              "delivered_order_late_rate"
+            ],
+            "filter_bindings": {}
+          },
+          "analysis_recipe": {
+            "tool": "refund_diagnosis",
+            "config": {
+              "query_id": "refund_input"
+            }
+          },
+          "chart": {
+            "type": "table"
+          },
+          "layout": {
+            "width": 12,
+            "order": 3
+          }
+        },
+        {
+          "id": "customer-repeat-cohort",
+          "title": "新老客贡献与首购队列复购",
+          "query": {
+            "id": "customer_repeat_cohort_input",
+            "sql": "WITH l AS(SELECT i.order_id,SUM(i.quantity*p.list_price) gross_sales,SUM(i.quantity*i.unit_cost) cogs FROM order_items i JOIN products p ON i.product_id=p.product_id GROUP BY i.order_id),\nf AS(SELECT h.order_id,SUM(f.shipping_cost) fulfillment,SUM(f.payment_fee) payment_fees FROM shipments h JOIN fulfillment_costs f ON h.shipment_id=f.shipment_id GROUP BY h.order_id),\nr AS(SELECT r.order_id,SUM(r.refund_amount) refunds FROM refunds r JOIN orders o ON r.order_id=o.order_id WHERE r.status='completed' AND r.refund_date>=o.order_date AND r.refund_date<=o.order_date+INTERVAL '30 days' AND r.refund_date<=DATE '2026-03-31' GROUP BY r.order_id),\nd AS(SELECT order_month,channel,SUM(order_total) month_sales FROM orders WHERE status='completed' GROUP BY order_month,channel),\nm AS(SELECT month_start,channel,SUM(spend) spend,SUM(retention_spend) retention_spend FROM marketing_spend GROUP BY month_start,channel),\nfinancials AS(SELECT o.order_id,o.customer_id,o.order_date,o.channel,o.order_total sales,l.gross_sales,l.gross_sales-o.order_total discounts,l.cogs,COALESCE(r.refunds,0) refunds,COALESCE(f.fulfillment,0) fulfillment,COALESCE(f.payment_fees,0) payment_fees,\nCOALESCE(m.spend*o.order_total/NULLIF(d.month_sales,0),0) marketing,COALESCE(m.retention_spend*o.order_total/NULLIF(d.month_sales,0),0) retention_marketing\nFROM orders o JOIN l ON o.order_id=l.order_id LEFT JOIN f ON o.order_id=f.order_id LEFT JOIN r ON o.order_id=r.order_id JOIN d ON o.order_month=d.order_month AND o.channel=d.channel LEFT JOIN m ON o.order_month=m.month_start AND o.channel=m.channel WHERE o.status='completed'),first_purchase AS(SELECT customer_id,MIN(order_date) first_date FROM orders WHERE status='completed' GROUP BY customer_id),\nreport AS(SELECT customer_id,SUM(sales) sales,SUM(sales-cogs-refunds-fulfillment-payment_fees-marketing) contribution_profit FROM financials WHERE order_date>=DATE '2025-01-01' AND order_date<DATE '2026-01-01' GROUP BY customer_id),\nrepeat90 AS(SELECT o.customer_id,COUNT(*) orders_90d FROM orders o JOIN first_purchase p ON o.customer_id=p.customer_id WHERE o.status='completed' AND o.order_date>=p.first_date AND o.order_date<p.first_date+INTERVAL '90 days' GROUP BY o.customer_id)\nSELECT p.customer_id,p.first_date,CASE WHEN p.first_date>=DATE '2025-01-01' THEN 'new' ELSE 'existing' END customer_kind,COALESCE(r.sales,0) sales,COALESCE(r.contribution_profit,0) contribution_profit,\nCASE WHEN p.first_date+INTERVAL '89 days'<=DATE '2026-03-31' THEN 1 ELSE 0 END eligible_90d,CASE WHEN z.orders_90d>=2 THEN 1 ELSE 0 END repurchased_90d\nFROM first_purchase p LEFT JOIN report r ON p.customer_id=r.customer_id LEFT JOIN repeat90 z ON p.customer_id=z.customer_id WHERE p.first_date<DATE '2026-01-01' ORDER BY p.customer_id",
+            "metric_ids": [
+              "new_existing_contribution",
+              "repurchase_90d"
+            ],
+            "filter_bindings": {}
+          },
+          "analysis_recipe": {
+            "tool": "customer_repeat_cohort",
+            "config": {
+              "query_id": "customer_repeat_cohort_input"
+            }
+          },
+          "chart": {
+            "type": "table"
+          },
+          "layout": {
+            "width": 12,
+            "order": 4
+          }
+        }
+      ]
+    }
+  ],
+  "data_version": "light-bi-3.1",
+  "reporting_range": {
+    "start": "2025-01-01",
+    "end": "2025-12-31"
+  },
+  "observation_end": "2026-03-31"
+}

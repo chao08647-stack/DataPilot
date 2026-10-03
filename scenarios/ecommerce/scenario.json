@@ -1,0 +1,683 @@
+{
+  "id": "ecommerce",
+  "title": "电商经营",
+  "description": "使用完全合成的订单、商品、退款和推广数据，分析销售、毛利、渠道与退款；不代表真实企业。",
+  "schema_version": "1",
+  "date_range": {
+    "start": "2024-01-01",
+    "end": "2025-12-31"
+  },
+  "tables": [
+    {
+      "name": "customers",
+      "description": "合成客户及注册区域",
+      "grain": "一客户一行",
+      "columns": {
+        "customer_id": "INTEGER",
+        "customer_name": "VARCHAR",
+        "region": "VARCHAR",
+        "signup_date": "DATE"
+      }
+    },
+    {
+      "name": "products",
+      "description": "商品参考价与参考成本；实际交易使用订单明细的历史成交值",
+      "grain": "一商品一行",
+      "columns": {
+        "product_id": "INTEGER",
+        "product_name": "VARCHAR",
+        "category": "VARCHAR",
+        "list_price": "DOUBLE",
+        "unit_cost": "DOUBLE"
+      }
+    },
+    {
+      "name": "orders",
+      "description": "订单表，金额含各行成交额；completed 才计入已完成销售",
+      "grain": "一订单一行",
+      "columns": {
+        "order_id": "INTEGER",
+        "customer_id": "INTEGER",
+        "order_date": "DATE",
+        "channel": "VARCHAR",
+        "status": "VARCHAR",
+        "order_total": "DOUBLE"
+      }
+    },
+    {
+      "name": "order_items",
+      "description": "交易发生时的数量、成交单价和单位成本",
+      "grain": "一订单明细一行",
+      "columns": {
+        "item_id": "INTEGER",
+        "order_id": "INTEGER",
+        "product_id": "INTEGER",
+        "quantity": "INTEGER",
+        "unit_price": "DOUBLE",
+        "unit_cost": "DOUBLE"
+      }
+    },
+    {
+      "name": "refunds",
+      "description": "退款记录，completed 表示退款成功，processing 不计已退金额",
+      "grain": "一退款一行",
+      "columns": {
+        "refund_id": "INTEGER",
+        "order_id": "INTEGER",
+        "item_id": "INTEGER",
+        "refund_date": "DATE",
+        "refund_amount": "DOUBLE",
+        "status": "VARCHAR"
+      }
+    },
+    {
+      "name": "marketing_spend",
+      "description": "按日及渠道记录推广支出；自然流量支出为零",
+      "grain": "日期×渠道",
+      "columns": {
+        "spend_date": "DATE",
+        "channel": "VARCHAR",
+        "spend": "DOUBLE"
+      }
+    }
+  ],
+  "relations": [
+    {
+      "left_table": "orders",
+      "left_column": "customer_id",
+      "right_table": "customers",
+      "right_column": "customer_id",
+      "cardinality": "many_to_one"
+    },
+    {
+      "left_table": "order_items",
+      "left_column": "order_id",
+      "right_table": "orders",
+      "right_column": "order_id",
+      "cardinality": "many_to_one"
+    },
+    {
+      "left_table": "order_items",
+      "left_column": "product_id",
+      "right_table": "products",
+      "right_column": "product_id",
+      "cardinality": "many_to_one"
+    },
+    {
+      "left_table": "refunds",
+      "left_column": "order_id",
+      "right_table": "orders",
+      "right_column": "order_id",
+      "cardinality": "many_to_one"
+    },
+    {
+      "left_table": "refunds",
+      "left_column": "item_id",
+      "right_table": "order_items",
+      "right_column": "item_id",
+      "cardinality": "many_to_one"
+    },
+    {
+      "left_table": "orders",
+      "left_column": "channel",
+      "right_table": "marketing_spend",
+      "right_column": "channel",
+      "additional_keys": [
+        {
+          "left_column": "order_date",
+          "right_column": "spend_date"
+        }
+      ],
+      "description": "分别将已完成订单销售与推广费用聚合到日期×渠道后，再同时按日期与渠道关联；不可只按渠道连接原始事实行。",
+      "cardinality": "many_to_one",
+      "preaggregation": "两侧先分别按全部关联键聚合，包含日期与对象维度，禁止重复累计事实金额。"
+    }
+  ],
+  "metrics": [
+    {
+      "id": "sales",
+      "name": "销售额",
+      "aliases": [
+        "GMV",
+        "成交额",
+        "营收"
+      ],
+      "expression": "SUM(orders.order_total)",
+      "description": "按 order_date 统计 status='completed' 的订单金额，未扣退款与推广费用；汇总订单层时不可因明细关联重复累计。",
+      "tables": [
+        "orders"
+      ],
+      "columns": [
+        "order_total",
+        "status",
+        "order_date"
+      ],
+      "dimensions": [
+        "channel",
+        "region",
+        "order_date"
+      ],
+      "time_column": "orders.order_date",
+      "grain": "订单",
+      "unit": "CNY",
+      "filters": [
+        "orders.status='completed'"
+      ],
+      "additivity": "additive"
+    },
+    {
+      "id": "gross_profit",
+      "name": "毛利",
+      "aliases": [
+        "毛利润"
+      ],
+      "expression": "SUM(order_items.quantity * (order_items.unit_price - order_items.unit_cost))",
+      "description": "仅统计 completed 订单；使用交易发生时的明细成本，不扣退款和推广费用，不能称为净利润。",
+      "tables": [
+        "orders",
+        "order_items"
+      ],
+      "columns": [
+        "quantity",
+        "unit_price",
+        "unit_cost",
+        "status"
+      ],
+      "dimensions": [
+        "channel",
+        "category",
+        "order_date"
+      ],
+      "time_column": "orders.order_date",
+      "grain": "订单明细",
+      "unit": "CNY",
+      "filters": [
+        "orders.status='completed'"
+      ],
+      "additivity": "additive"
+    },
+    {
+      "id": "gross_margin",
+      "name": "毛利率",
+      "aliases": [
+        "销售毛利率"
+      ],
+      "expression": "SUM(order_items.quantity * (order_items.unit_price - order_items.unit_cost)) / NULLIF(SUM(order_items.quantity * order_items.unit_price),0)",
+      "description": "completed 订单明细；汇总毛利除以汇总销售，不能直接平均各单毛利率；返回0到1比例。",
+      "tables": [
+        "orders",
+        "order_items"
+      ],
+      "columns": [
+        "quantity",
+        "unit_price",
+        "unit_cost",
+        "status"
+      ],
+      "dimensions": [
+        "channel",
+        "category",
+        "order_date"
+      ],
+      "time_column": "orders.order_date",
+      "grain": "订单明细",
+      "unit": "ratio",
+      "filters": [
+        "orders.status='completed'"
+      ],
+      "additivity": "ratio",
+      "denominator": "已完成订单明细销售额之和"
+    },
+    {
+      "id": "refund_amount",
+      "name": "退款金额",
+      "aliases": [
+        "已退款",
+        "成功退款金额"
+      ],
+      "expression": "SUM(refunds.refund_amount)",
+      "description": "按 refund_date 统计退款 status='completed' 的金额；与订单 status 区分。",
+      "tables": [
+        "refunds"
+      ],
+      "columns": [
+        "refund_amount",
+        "refund_date",
+        "status"
+      ],
+      "dimensions": [
+        "channel",
+        "refund_date"
+      ],
+      "time_column": "refunds.refund_date",
+      "grain": "退款",
+      "unit": "CNY",
+      "filters": [
+        "refunds.status='completed'"
+      ],
+      "additivity": "additive"
+    },
+    {
+      "id": "aov",
+      "name": "客单价",
+      "aliases": [
+        "平均订单金额"
+      ],
+      "expression": "SUM(orders.order_total) / NULLIF(COUNT(DISTINCT orders.order_id),0)",
+      "description": "completed 订单销售额除以订单数，先保持每订单一行，金额未扣退款。",
+      "tables": [
+        "orders"
+      ],
+      "columns": [
+        "order_total",
+        "order_id",
+        "status"
+      ],
+      "dimensions": [
+        "channel",
+        "order_date"
+      ],
+      "time_column": "orders.order_date",
+      "grain": "订单",
+      "unit": "CNY/order",
+      "filters": [
+        "orders.status='completed'"
+      ],
+      "additivity": "ratio",
+      "denominator": "同口径已完成订单或交易去重数"
+    },
+    {
+      "id": "roas",
+      "name": "推广产出比",
+      "aliases": [
+        "ROAS",
+        "渠道效率"
+      ],
+      "expression": "sales / NULLIF(spend,0)",
+      "description": "将 completed 订单销售额及推广费用分别按同一日期×渠道聚合后关联；零支出返回 NULL，不写成零回报或无穷大。",
+      "tables": [
+        "orders",
+        "marketing_spend"
+      ],
+      "columns": [
+        "order_total",
+        "order_date",
+        "spend",
+        "spend_date",
+        "channel"
+      ],
+      "dimensions": [
+        "channel",
+        "spend_date"
+      ],
+      "time_column": "orders.order_date",
+      "grain": "日期×渠道",
+      "unit": "ratio",
+      "filters": [
+        "orders.status='completed'"
+      ],
+      "additivity": "ratio",
+      "denominator": "同日期渠道推广支出"
+    }
+  ],
+  "examples": [
+    {
+      "id": "profit-trend",
+      "question": "比较2025年各月销售额和毛利，重点观察第四季度。",
+      "title": "2025年月度销售与毛利",
+      "sql": "SELECT strftime(o.order_date, '%Y-%m') AS month, ROUND(SUM(i.quantity*i.unit_price),2) AS sales, ROUND(SUM(i.quantity*(i.unit_price-i.unit_cost)),2) AS gross_profit FROM orders o JOIN order_items i ON o.order_id=i.order_id WHERE o.status='completed' AND o.order_date >= DATE '2025-01-01' AND o.order_date < DATE '2026-01-01' GROUP BY 1 ORDER BY 1",
+      "x": "month",
+      "y": [
+        "sales",
+        "gross_profit"
+      ],
+      "chart_type": "line",
+      "tags": [
+        "trend",
+        "profit"
+      ]
+    },
+    {
+      "id": "channel-refunds",
+      "question": "2025年各渠道成功退款金额分别是多少？",
+      "title": "渠道成功退款金额",
+      "sql": "SELECT o.channel, ROUND(SUM(r.refund_amount),2) AS refund_amount FROM refunds r JOIN orders o ON r.order_id=o.order_id WHERE r.status='completed' AND r.refund_date >= DATE '2025-01-01' GROUP BY o.channel ORDER BY refund_amount DESC",
+      "x": "channel",
+      "y": [
+        "refund_amount"
+      ],
+      "chart_type": "bar",
+      "tags": [
+        "refund",
+        "channel",
+        "ranking"
+      ]
+    },
+    {
+      "id": "channel-roas",
+      "question": "比较2025年各渠道销售额、推广支出和ROAS，零支出保留为空。",
+      "title": "渠道推广产出比（ROAS）",
+      "sql": "WITH sales AS(SELECT order_date AS date,channel,SUM(order_total) AS sales FROM orders WHERE status='completed' AND order_date>=DATE '2025-01-01' AND order_date<DATE '2026-01-01' GROUP BY order_date,channel),ads AS(SELECT spend_date AS date,channel,SUM(spend) AS spend FROM marketing_spend WHERE spend_date>=DATE '2025-01-01' AND spend_date<DATE '2026-01-01' GROUP BY spend_date,channel) SELECT a.channel,COALESCE(SUM(s.sales),0) AS sales,SUM(a.spend) AS spend,ROUND(SUM(s.sales)/NULLIF(SUM(a.spend),0),2) AS roas FROM ads a LEFT JOIN sales s ON a.channel=s.channel AND a.date=s.date GROUP BY a.channel ORDER BY a.channel",
+      "x": "channel",
+      "y": [
+        "roas"
+      ],
+      "chart_type": "bar",
+      "tags": [
+        "channel",
+        "comparison"
+      ]
+    }
+  ],
+  "business_knowledge": [
+    {
+      "id": "refund-status",
+      "title": "退款申请与成功退款",
+      "content": "退款表的 processing 是处理中，仅 completed 才是已退款；按退款日期衡量当期退款。跨表使用 status 字段必须带表别名。",
+      "tags": [
+        "refund",
+        "status"
+      ]
+    },
+    {
+      "id": "profit-boundary",
+      "title": "毛利不是净利润",
+      "content": "本场景毛利使用交易时单价减交易时成本，不扣推广、退款、物流和人员费用。不要用毛利结果回答净利润；缺少费用数据时说明限制。",
+      "tags": [
+        "profit"
+      ]
+    },
+    {
+      "id": "fanout-risk",
+      "title": "多明细关联的重复统计风险",
+      "content": "订单与商品明细、退款明细均为一对多。在合并销售、退款、推广数据前，各自汇总到公共粒度，再用完整公共维度关联。",
+      "tags": [
+        "join",
+        "refund",
+        "channel"
+      ]
+    },
+    {
+      "id": "campaign-context",
+      "title": "合成促销阶段的解释边界",
+      "content": "合成数据在2025年第四季度增加订单并降低部分成交价格，同时提高交易成本。这是模拟机制而非真实运营事件；结论仍需用查询结果证实变化，不能推断真实企业因果。",
+      "tags": [
+        "profit",
+        "trend"
+      ]
+    }
+  ],
+  "preferences": [
+    {
+      "id": "channel-view",
+      "title": "默认按渠道展开",
+      "key": "default_dimension",
+      "value": "channel",
+      "description": "问题没有指定分组时，优先按渠道汇总；本次明确维度优先。"
+    },
+    {
+      "id": "profit-first",
+      "title": "优先展示毛利",
+      "key": "priority_metric",
+      "value": "gross_profit",
+      "description": "经营概览优先查看毛利；若需补充该指标，应在查询计划中明确纳入。"
+    },
+    {
+      "id": "money-unit",
+      "title": "金额使用万元",
+      "key": "currency_display_unit",
+      "value": "万",
+      "description": "仅改变展示单位，SQL原值仍为元，图表必须明确单位。"
+    }
+  ],
+  "repair_experiences": [
+    {
+      "id": "ec-grouping",
+      "title": "渠道汇总遗漏分组",
+      "content": "按渠道汇总金额时，非聚合维度必须进入 GROUP BY。不要用任意值函数隐藏维度错误；以用户要求的渠道粒度聚合。",
+      "error_category": "aggregation",
+      "tables": [
+        "orders"
+      ],
+      "fixture_sql": [
+        "CREATE TABLE orders(order_id INTEGER, channel VARCHAR, order_total DOUBLE, status VARCHAR)",
+        "INSERT INTO orders VALUES(1,'自然流量',100,'completed'),(2,'自然流量',200,'completed'),(3,'付费推广',80,'completed')"
+      ],
+      "broken_sql": "SELECT channel,SUM(order_total) FROM orders",
+      "fixed_sql": "SELECT channel,SUM(order_total) FROM orders GROUP BY channel ORDER BY channel",
+      "expected": [
+        [
+          "付费推广",
+          80
+        ],
+        [
+          "自然流量",
+          300
+        ]
+      ]
+    },
+    {
+      "id": "ec-ambiguous-status",
+      "title": "关联后状态列歧义",
+      "content": "订单和退款都有 status 字段，必须限定表别名。退款成功使用退款状态，不能把订单状态作为退款是否完成的判断。",
+      "error_category": "schema",
+      "tables": [
+        "orders",
+        "refunds"
+      ],
+      "fixture_sql": [
+        "CREATE TABLE orders(order_id INTEGER,status VARCHAR)",
+        "CREATE TABLE refunds(order_id INTEGER,status VARCHAR,refund_amount DOUBLE)",
+        "INSERT INTO orders VALUES(1,'completed')",
+        "INSERT INTO refunds VALUES(1,'completed',30),(1,'processing',20)"
+      ],
+      "broken_sql": "SELECT SUM(refund_amount) FROM orders o JOIN refunds r ON o.order_id=r.order_id WHERE status='completed'",
+      "fixed_sql": "SELECT SUM(r.refund_amount) FROM orders o JOIN refunds r ON o.order_id=r.order_id WHERE r.status='completed'",
+      "expected": [
+        [
+          30
+        ]
+      ]
+    },
+    {
+      "id": "ec-fanout",
+      "title": "订单明细与退款关联造成金额翻倍",
+      "content": "订单下有多条退款时，将订单明细直接关联退款会放大销售额。分别按订单聚合销售和成功退款，再以订单键关联；检查合并前后销售总额不变。",
+      "error_category": "semantic",
+      "tables": [
+        "orders",
+        "order_items",
+        "refunds"
+      ],
+      "fixture_sql": [
+        "CREATE TABLE orders(order_id INTEGER)",
+        "CREATE TABLE order_items(order_id INTEGER,quantity INTEGER,unit_price DOUBLE)",
+        "CREATE TABLE refunds(order_id INTEGER,refund_amount DOUBLE,status VARCHAR)",
+        "INSERT INTO orders VALUES(1)",
+        "INSERT INTO order_items VALUES(1,1,100),(1,1,50)",
+        "INSERT INTO refunds VALUES(1,10,'completed'),(1,20,'completed')"
+      ],
+      "broken_sql": "SELECT SUM(i.quantity*i.unit_price) AS sales,SUM(r.refund_amount) AS refunded FROM orders o JOIN order_items i ON o.order_id=i.order_id JOIN refunds r ON o.order_id=r.order_id",
+      "fixed_sql": "WITH s AS(SELECT order_id,SUM(quantity*unit_price) sales FROM order_items GROUP BY order_id),r AS(SELECT order_id,SUM(refund_amount) refunded FROM refunds WHERE status='completed' GROUP BY order_id) SELECT SUM(s.sales) AS sales,SUM(r.refunded) AS refunded FROM orders o JOIN s ON o.order_id=s.order_id JOIN r ON o.order_id=r.order_id",
+      "expected": [
+        [
+          150,
+          30
+        ]
+      ]
+    },
+    {
+      "id": "ec-refund-status",
+      "title": "把处理中退款计入成功退款",
+      "content": "退款金额统计需按正式指标卡筛选成功状态。processing 不代表资金已经退回；SQL可执行也要复核状态与时间口径。",
+      "error_category": "semantic",
+      "tables": [
+        "refunds"
+      ],
+      "fixture_sql": [
+        "CREATE TABLE refunds(refund_id INTEGER,refund_amount DOUBLE,status VARCHAR)",
+        "INSERT INTO refunds VALUES(1,30,'completed'),(2,20,'processing')"
+      ],
+      "broken_sql": "SELECT SUM(refund_amount) FROM refunds",
+      "fixed_sql": "SELECT SUM(refund_amount) FROM refunds WHERE status='completed'",
+      "expected": [
+        [
+          30
+        ]
+      ]
+    }
+  ],
+  "evaluation": [
+    {
+      "id": "ec-01",
+      "question": "有多少个客户？",
+      "sql": "SELECT COUNT(*) AS customers FROM customers",
+      "expected": [
+        [
+          24
+        ]
+      ]
+    },
+    {
+      "id": "ec-02",
+      "question": "2025年12月有多少个订单（包含取消）？",
+      "sql": "SELECT COUNT(*) AS orders FROM orders WHERE order_date>=DATE '2025-12-01' AND order_date<DATE '2026-01-01'",
+      "expected": [
+        [
+          372
+        ]
+      ]
+    },
+    {
+      "id": "ec-03",
+      "question": "分别统计2024年和2025年的订单数（包含取消）。",
+      "sql": "SELECT year(order_date) AS year,COUNT(*) AS orders FROM orders GROUP BY 1 ORDER BY 1",
+      "expected": [
+        [
+          2024,
+          2196
+        ],
+        [
+          2025,
+          2742
+        ]
+      ]
+    },
+    {
+      "id": "ec-04",
+      "question": "各渠道总订单数是多少（包含取消）？",
+      "sql": "SELECT channel,COUNT(*) AS orders FROM orders GROUP BY 1 ORDER BY 1",
+      "expected": [
+        [
+          "付费推广",
+          1646
+        ],
+        [
+          "平台商城",
+          1646
+        ],
+        [
+          "自然流量",
+          1646
+        ]
+      ]
+    },
+    {
+      "id": "ec-05",
+      "question": "2025年各渠道完成订单的销售额是多少？",
+      "sql": "SELECT channel,ROUND(SUM(order_total),2) AS sales FROM orders WHERE status='completed' AND order_date>=DATE '2025-01-01' GROUP BY 1 ORDER BY 1",
+      "expected": [
+        [
+          "付费推广",
+          1065037
+        ],
+        [
+          "平台商城",
+          1039861
+        ],
+        [
+          "自然流量",
+          1044460
+        ]
+      ]
+    },
+    {
+      "id": "ec-06",
+      "question": "2025年各商品类别的毛利是多少？",
+      "sql": "SELECT p.category,ROUND(SUM(i.quantity*(i.unit_price-i.unit_cost)),2) AS gross_profit FROM orders o JOIN order_items i ON o.order_id=i.order_id JOIN products p ON i.product_id=p.product_id WHERE o.status='completed' AND o.order_date>=DATE '2025-01-01' GROUP BY 1 ORDER BY 1",
+      "expected": [
+        [
+          "家居",
+          320808.75
+        ],
+        [
+          "数码",
+          655340
+        ],
+        [
+          "配件",
+          111454.25
+        ]
+      ]
+    },
+    {
+      "id": "ec-07",
+      "question": "成功退款金额是多少？",
+      "sql": "SELECT ROUND(SUM(refund_amount),2) AS refunded FROM refunds WHERE status='completed'",
+      "expected": [
+        [
+          84900
+        ]
+      ]
+    },
+    {
+      "id": "ec-08",
+      "question": "各渠道2025年推广支出是多少？",
+      "sql": "SELECT channel,ROUND(SUM(spend),2) AS spend FROM marketing_spend WHERE spend_date>=DATE '2025-01-01' GROUP BY 1 ORDER BY 1",
+      "expected": [
+        [
+          "付费推广",
+          64410
+        ],
+        [
+          "平台商城",
+          77292
+        ],
+        [
+          "自然流量",
+          0
+        ]
+      ]
+    },
+    {
+      "id": "ec-09",
+      "question": "2025年已完成订单的客单价是多少？",
+      "sql": "SELECT ROUND(SUM(order_total)/COUNT(DISTINCT order_id),2) AS aov FROM orders WHERE status='completed' AND order_date>=DATE '2025-01-01'",
+      "expected": [
+        [
+          1220.21
+        ]
+      ]
+    },
+    {
+      "id": "ec-10",
+      "question": "2025年有多少笔成功退款？",
+      "sql": "SELECT COUNT(*) AS refunds FROM refunds WHERE status='completed' AND refund_date>=DATE '2025-01-01'",
+      "expected": [
+        [
+          157
+        ]
+      ]
+    }
+  ],
+  "clarifications": [
+    {
+      "question": "看看利润变化。",
+      "answer": "按2025年月度毛利分析，不包含退款和营销费用。"
+    },
+    {
+      "question": "退款率是多少？",
+      "answer": "按2025年订单队列，成功退款的订单数除以完成订单数；同一订单多次退款只算一次。"
+    }
+  ]
+}

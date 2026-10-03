@@ -1,0 +1,754 @@
+{
+  "id": "retail",
+  "title": "连锁门店",
+  "description": "基于合成门店、交易、商品、库存快照和客流，比较经营表现、商品结构与缺货，不包含真实门店信息。",
+  "schema_version": "1",
+  "date_range": {
+    "start": "2024-01-01",
+    "end": "2025-12-31"
+  },
+  "tables": [
+    {
+      "name": "stores",
+      "description": "六家合成门店及所属区域",
+      "grain": "一门店一行",
+      "columns": {
+        "store_id": "INTEGER",
+        "store_name": "VARCHAR",
+        "region": "VARCHAR",
+        "store_type": "VARCHAR",
+        "open_date": "DATE"
+      }
+    },
+    {
+      "name": "products",
+      "description": "商品参考售价与成本，交易统计使用明细历史单价",
+      "grain": "一商品一行",
+      "columns": {
+        "product_id": "INTEGER",
+        "product_name": "VARCHAR",
+        "category": "VARCHAR",
+        "list_price": "DOUBLE",
+        "unit_cost": "DOUBLE"
+      }
+    },
+    {
+      "name": "transactions",
+      "description": "门店收银交易，仅completed计入销售",
+      "grain": "一交易一行",
+      "columns": {
+        "transaction_id": "INTEGER",
+        "store_id": "INTEGER",
+        "transaction_date": "DATE",
+        "status": "VARCHAR",
+        "transaction_total": "DOUBLE"
+      }
+    },
+    {
+      "name": "transaction_items",
+      "description": "收银交易明细，数量、单价和成本为交易时值",
+      "grain": "一交易明细一行",
+      "columns": {
+        "item_id": "INTEGER",
+        "transaction_id": "INTEGER",
+        "product_id": "INTEGER",
+        "quantity": "INTEGER",
+        "unit_price": "DOUBLE",
+        "unit_cost": "DOUBLE"
+      }
+    },
+    {
+      "name": "inventory_snapshots",
+      "description": "每日库存快照；缺失行代表没有观测，不能当作0",
+      "grain": "日期×门店×商品",
+      "columns": {
+        "store_id": "INTEGER",
+        "product_id": "INTEGER",
+        "snapshot_date": "DATE",
+        "stock_on_hand": "INTEGER"
+      }
+    },
+    {
+      "name": "footfall",
+      "description": "门店日客流统计，不是去重会员数",
+      "grain": "日期×门店",
+      "columns": {
+        "store_id": "INTEGER",
+        "visit_date": "DATE",
+        "visitors": "INTEGER"
+      }
+    }
+  ],
+  "relations": [
+    {
+      "left_table": "transactions",
+      "left_column": "store_id",
+      "right_table": "stores",
+      "right_column": "store_id",
+      "cardinality": "many_to_one"
+    },
+    {
+      "left_table": "transaction_items",
+      "left_column": "transaction_id",
+      "right_table": "transactions",
+      "right_column": "transaction_id",
+      "cardinality": "many_to_one"
+    },
+    {
+      "left_table": "transaction_items",
+      "left_column": "product_id",
+      "right_table": "products",
+      "right_column": "product_id",
+      "cardinality": "many_to_one"
+    },
+    {
+      "left_table": "inventory_snapshots",
+      "left_column": "store_id",
+      "right_table": "stores",
+      "right_column": "store_id",
+      "cardinality": "many_to_one"
+    },
+    {
+      "left_table": "inventory_snapshots",
+      "left_column": "product_id",
+      "right_table": "products",
+      "right_column": "product_id",
+      "cardinality": "many_to_one"
+    },
+    {
+      "left_table": "footfall",
+      "left_column": "store_id",
+      "right_table": "stores",
+      "right_column": "store_id",
+      "cardinality": "many_to_one"
+    },
+    {
+      "left_table": "transactions",
+      "left_column": "store_id",
+      "right_table": "footfall",
+      "right_column": "store_id",
+      "additional_keys": [
+        {
+          "left_column": "transaction_date",
+          "right_column": "visit_date"
+        }
+      ],
+      "description": "分别将已完成交易数量与客流聚合到日期×门店后，再同时按日期与门店关联；不可把日客流重复累计到交易明细。",
+      "cardinality": "many_to_one",
+      "preaggregation": "两侧先分别按全部关联键聚合，包含日期与对象维度，禁止重复累计事实金额。"
+    }
+  ],
+  "metrics": [
+    {
+      "id": "sales",
+      "name": "门店销售额",
+      "aliases": [
+        "营业额",
+        "营收",
+        "销售额"
+      ],
+      "expression": "SUM(transactions.transaction_total)",
+      "description": "按transaction_date汇总completed交易；关联交易明细前确保不会重复累计整单金额。",
+      "tables": [
+        "transactions"
+      ],
+      "columns": [
+        "transaction_total",
+        "transaction_date",
+        "status"
+      ],
+      "dimensions": [
+        "store_id",
+        "region",
+        "transaction_date"
+      ],
+      "time_column": "transactions.transaction_date",
+      "grain": "交易",
+      "unit": "CNY",
+      "filters": [
+        "transactions.status='completed'"
+      ],
+      "additivity": "additive"
+    },
+    {
+      "id": "gross_profit",
+      "name": "门店毛利",
+      "aliases": [
+        "毛利",
+        "商品毛利"
+      ],
+      "expression": "SUM(transaction_items.quantity*(transaction_items.unit_price-transaction_items.unit_cost))",
+      "description": "completed交易的商品成交额减历史成本，不含租金、人工、营销等费用。",
+      "tables": [
+        "transactions",
+        "transaction_items"
+      ],
+      "columns": [
+        "quantity",
+        "unit_price",
+        "unit_cost",
+        "status"
+      ],
+      "dimensions": [
+        "store_id",
+        "region",
+        "category"
+      ],
+      "time_column": "transactions.transaction_date",
+      "grain": "交易明细",
+      "unit": "CNY",
+      "filters": [
+        "transactions.status='completed'"
+      ],
+      "additivity": "additive"
+    },
+    {
+      "id": "aov",
+      "name": "门店客单价",
+      "aliases": [
+        "客单价",
+        "平均交易额"
+      ],
+      "expression": "SUM(transactions.transaction_total)/NULLIF(COUNT(DISTINCT transactions.transaction_id),0)",
+      "description": "completed交易的销售额除以交易数，必须在交易粒度计算；并非每位去重顾客消费。",
+      "tables": [
+        "transactions"
+      ],
+      "columns": [
+        "transaction_total",
+        "transaction_id",
+        "status"
+      ],
+      "dimensions": [
+        "store_id",
+        "region"
+      ],
+      "time_column": "transactions.transaction_date",
+      "grain": "交易",
+      "unit": "CNY/transaction",
+      "filters": [
+        "transactions.status='completed'"
+      ],
+      "additivity": "ratio",
+      "denominator": "同口径已完成订单或交易去重数"
+    },
+    {
+      "id": "units_sold",
+      "name": "商品销量",
+      "aliases": [
+        "销售数量",
+        "销量"
+      ],
+      "expression": "SUM(transaction_items.quantity)",
+      "description": "completed交易的商品件数，不是明细行数。",
+      "tables": [
+        "transactions",
+        "transaction_items"
+      ],
+      "columns": [
+        "quantity",
+        "product_id",
+        "status"
+      ],
+      "dimensions": [
+        "store_id",
+        "category",
+        "product_id"
+      ],
+      "time_column": "transactions.transaction_date",
+      "grain": "交易明细",
+      "unit": "units",
+      "filters": [
+        "transactions.status='completed'"
+      ],
+      "additivity": "additive"
+    },
+    {
+      "id": "ending_stock",
+      "name": "期末库存",
+      "aliases": [
+        "当前库存",
+        "库存余额"
+      ],
+      "expression": "SUM(latest_snapshot.stock_on_hand)",
+      "description": "每门店每商品取截至指定日期最近一条快照，再汇总stock_on_hand；不能累加跨日期快照。须展示实际快照日期，缺失不视为零。",
+      "tables": [
+        "inventory_snapshots"
+      ],
+      "columns": [
+        "stock_on_hand",
+        "snapshot_date",
+        "store_id",
+        "product_id"
+      ],
+      "dimensions": [
+        "store_id",
+        "product_id",
+        "region",
+        "category"
+      ],
+      "time_column": "inventory_snapshots.snapshot_date",
+      "grain": "门店×商品×最近快照",
+      "unit": "units",
+      "filters": [
+        "每店每商品截至时点最近非缺失快照"
+      ],
+      "additivity": "semi_additive",
+      "non_additive_dimensions": [
+        "time"
+      ]
+    },
+    {
+      "id": "stockout_rate",
+      "name": "缺货观测率",
+      "aliases": [
+        "缺货率"
+      ],
+      "expression": "COUNT(*) FILTER(WHERE stock_on_hand=0)*1.0/NULLIF(COUNT(*),0)",
+      "description": "已观测门店×商品×日期快照中库存为0的比例；缺失快照不作为零库存，不等价于营业时长缺货率。",
+      "tables": [
+        "inventory_snapshots"
+      ],
+      "columns": [
+        "stock_on_hand",
+        "snapshot_date"
+      ],
+      "dimensions": [
+        "store_id",
+        "product_id",
+        "region"
+      ],
+      "time_column": "inventory_snapshots.snapshot_date",
+      "grain": "库存快照",
+      "unit": "ratio",
+      "filters": [
+        "仅非缺失快照"
+      ],
+      "additivity": "ratio",
+      "denominator": "非缺失的库存快照数"
+    },
+    {
+      "id": "footfall_conversion",
+      "name": "客流成交比",
+      "aliases": [
+        "进店转化",
+        "成交转化率"
+      ],
+      "expression": "completed_transactions/NULLIF(visitors,0)",
+      "description": "按日期×门店分别聚合completed交易数与客流，再按完整公共维度关联；不是去重用户转化率，不能按交易明细计数。",
+      "tables": [
+        "transactions",
+        "footfall"
+      ],
+      "columns": [
+        "transaction_id",
+        "transaction_date",
+        "visit_date",
+        "store_id",
+        "visitors"
+      ],
+      "dimensions": [
+        "store_id",
+        "region"
+      ],
+      "time_column": "transactions.transaction_date",
+      "grain": "日期×门店",
+      "unit": "ratio",
+      "filters": [
+        "transactions.status='completed'"
+      ],
+      "additivity": "ratio",
+      "denominator": "同门店同日访问人次"
+    }
+  ],
+  "examples": [
+    {
+      "id": "store-comparison",
+      "question": "比较2025年第四季度各门店销售额和客单价。",
+      "title": "2025年第四季度门店经营对比",
+      "sql": "SELECT s.store_name,ROUND(SUM(t.transaction_total),2) AS sales,ROUND(SUM(t.transaction_total)/COUNT(DISTINCT t.transaction_id),2) AS aov FROM transactions t JOIN stores s ON t.store_id=s.store_id WHERE t.status='completed' AND t.transaction_date>=DATE '2025-10-01' AND t.transaction_date<DATE '2026-01-01' GROUP BY s.store_name ORDER BY sales DESC",
+      "x": "store_name",
+      "y": [
+        "sales"
+      ],
+      "chart_type": "bar",
+      "tags": [
+        "store",
+        "comparison"
+      ]
+    },
+    {
+      "id": "stockout-stores",
+      "question": "2025年第四季度各门店库存快照中的缺货观测率是多少？",
+      "title": "门店缺货观测率",
+      "sql": "SELECT s.store_name,COUNT(*) AS observed_snapshots,COUNT(*) FILTER(WHERE i.stock_on_hand=0) AS zero_snapshots,ROUND(COUNT(*) FILTER(WHERE i.stock_on_hand=0)*100.0/NULLIF(COUNT(*),0),2) AS stockout_pct FROM inventory_snapshots i JOIN stores s ON i.store_id=s.store_id WHERE i.snapshot_date>=DATE '2025-10-01' AND i.snapshot_date<DATE '2026-01-01' GROUP BY s.store_name ORDER BY stockout_pct DESC,s.store_name",
+      "x": "store_name",
+      "y": [
+        "stockout_pct"
+      ],
+      "chart_type": "bar",
+      "tags": [
+        "inventory",
+        "ranking"
+      ]
+    },
+    {
+      "id": "traffic-conversion",
+      "question": "2025年第四季度各门店的客流成交比是多少？",
+      "title": "门店客流成交比",
+      "sql": "WITH sales AS(SELECT transaction_date AS date,store_id,COUNT(*) AS transactions FROM transactions WHERE status='completed' AND transaction_date>=DATE '2025-10-01' AND transaction_date<DATE '2026-01-01' GROUP BY transaction_date,store_id),visits AS(SELECT visit_date AS date,store_id,SUM(visitors) AS visitors FROM footfall WHERE visit_date>=DATE '2025-10-01' AND visit_date<DATE '2026-01-01' GROUP BY visit_date,store_id) SELECT v.store_id,COALESCE(SUM(s.transactions),0) AS transactions,SUM(v.visitors) AS visitors,ROUND(COALESCE(SUM(s.transactions),0)*100.0/NULLIF(SUM(v.visitors),0),2) AS conversion_pct FROM visits v LEFT JOIN sales s ON v.store_id=s.store_id AND v.date=s.date GROUP BY v.store_id ORDER BY v.store_id",
+      "x": "store_id",
+      "y": [
+        "conversion_pct"
+      ],
+      "chart_type": "bar",
+      "tags": [
+        "store",
+        "conversion"
+      ]
+    }
+  ],
+  "business_knowledge": [
+    {
+      "id": "snapshot-not-flow",
+      "title": "库存快照不是流量",
+      "content": "库存为时点余额。期末库存应逐门店逐商品取截至日期最近一条快照，不累计多个日期；比较库存变化时使用两个时点。",
+      "tags": [
+        "inventory"
+      ]
+    },
+    {
+      "id": "missing-not-zero",
+      "title": "缺失库存不是零库存",
+      "content": "缺失快照只说明未观测到库存，不能自动填零。缺货观测率的分母为有效快照数，并披露缺失数据；该比例不是缺货营业时长。",
+      "tags": [
+        "inventory",
+        "quality"
+      ]
+    },
+    {
+      "id": "like-for-like",
+      "title": "门店比较保持同口径",
+      "content": "比较不同门店或不同时段时，应保持日期范围、交易状态和营业范围一致。期间天数不同应说明或补充日均指标，不能仅凭总额断言效率差异。",
+      "tags": [
+        "store",
+        "comparison"
+      ]
+    },
+    {
+      "id": "traffic-not-customers",
+      "title": "客流不是去重顾客",
+      "content": "客流表是访问计数，交易表是收银单。客流成交比属于运营参考指标，不等价于用户级转化率，也不能据此判断某个顾客是否购买。",
+      "tags": [
+        "store",
+        "conversion"
+      ]
+    }
+  ],
+  "preferences": [
+    {
+      "id": "region-view",
+      "title": "默认按区域比较",
+      "key": "default_dimension",
+      "value": "region",
+      "description": "未指定经营比较维度时按区域，明确门店或商品要求优先。"
+    },
+    {
+      "id": "weak-stores",
+      "title": "突出表现较弱的门店",
+      "key": "ranking_focus",
+      "value": "bottom",
+      "description": "经营对比优先突出较弱门店，同时说明比较口径，不替换明确Top要求。"
+    },
+    {
+      "id": "comparison-chart",
+      "title": "对比优先用柱状图",
+      "key": "comparison_chart",
+      "value": "bar",
+      "description": "分类对比默认柱状图，时间趋势或用户明确图表要求不受影响。"
+    }
+  ],
+  "repair_experiences": [
+    {
+      "id": "retail-nested-aggregate",
+      "title": "计算客单价时聚合嵌套",
+      "content": "SQL不支持在同一聚合层直接嵌套SUM与AVG。先按交易汇总明细金额，再按门店计算平均交易额；以CTE区分交易粒度与门店粒度。",
+      "error_category": "aggregation",
+      "tables": [
+        "transaction_items"
+      ],
+      "fixture_sql": [
+        "CREATE TABLE transaction_items(transaction_id INTEGER,quantity INTEGER,unit_price DOUBLE)",
+        "INSERT INTO transaction_items VALUES(1,1,100),(1,1,50),(2,1,50)"
+      ],
+      "broken_sql": "SELECT AVG(SUM(quantity*unit_price)) FROM transaction_items GROUP BY transaction_id",
+      "fixed_sql": "WITH per_transaction AS(SELECT transaction_id,SUM(quantity*unit_price) amount FROM transaction_items GROUP BY transaction_id) SELECT AVG(amount) FROM per_transaction",
+      "expected": [
+        [
+          100
+        ]
+      ]
+    },
+    {
+      "id": "retail-stock-column",
+      "title": "库存字段误用数量列",
+      "content": "库存快照的库存余额字段为stock_on_hand，quantity是交易明细销量。修复字段时依据表结构，不能把销量替代库存。",
+      "error_category": "schema",
+      "tables": [
+        "inventory_snapshots"
+      ],
+      "fixture_sql": [
+        "CREATE TABLE inventory_snapshots(store_id INTEGER,product_id INTEGER,snapshot_date DATE,stock_on_hand INTEGER)",
+        "INSERT INTO inventory_snapshots VALUES(1,1,'2025-12-31',10),(1,2,'2025-12-31',20)"
+      ],
+      "broken_sql": "SELECT SUM(quantity) FROM inventory_snapshots",
+      "fixed_sql": "SELECT SUM(stock_on_hand) FROM inventory_snapshots WHERE snapshot_date=DATE '2025-12-31'",
+      "expected": [
+        [
+          30
+        ]
+      ]
+    },
+    {
+      "id": "retail-stock-snapshot",
+      "title": "把每日库存累加为期末库存",
+      "content": "库存快照按日期相加会重复累计同一批存货。按门店与商品分组，以截至日期最近快照为准再求和；缺失快照不要填零。",
+      "error_category": "semantic",
+      "tables": [
+        "inventory_snapshots"
+      ],
+      "fixture_sql": [
+        "CREATE TABLE inventory_snapshots(store_id INTEGER,product_id INTEGER,snapshot_date DATE,stock_on_hand INTEGER)",
+        "INSERT INTO inventory_snapshots VALUES(1,1,'2025-12-30',10),(1,1,'2025-12-31',7),(1,2,'2025-12-30',5)"
+      ],
+      "broken_sql": "SELECT SUM(stock_on_hand) FROM inventory_snapshots WHERE snapshot_date<=DATE '2025-12-31'",
+      "fixed_sql": "WITH latest AS(SELECT *,ROW_NUMBER() OVER(PARTITION BY store_id,product_id ORDER BY snapshot_date DESC) rn FROM inventory_snapshots WHERE snapshot_date<=DATE '2025-12-31') SELECT SUM(stock_on_hand) FROM latest WHERE rn=1",
+      "expected": [
+        [
+          12
+        ]
+      ]
+    },
+    {
+      "id": "retail-aov-fanout",
+      "title": "商品明细加权导致客单价偏差",
+      "content": "将交易关联商品明细后直接AVG整单金额，会按明细数给交易加权。客单价应在一交易一行计算销售额除交易数；必要时先去重或汇总到交易粒度。",
+      "error_category": "semantic",
+      "tables": [
+        "transactions",
+        "transaction_items"
+      ],
+      "fixture_sql": [
+        "CREATE TABLE transactions(transaction_id INTEGER,transaction_total DOUBLE,status VARCHAR)",
+        "CREATE TABLE transaction_items(item_id INTEGER,transaction_id INTEGER)",
+        "INSERT INTO transactions VALUES(1,150,'completed'),(2,50,'completed')",
+        "INSERT INTO transaction_items VALUES(1,1),(2,1),(3,2)"
+      ],
+      "broken_sql": "SELECT AVG(t.transaction_total) FROM transactions t JOIN transaction_items i ON t.transaction_id=i.transaction_id WHERE t.status='completed'",
+      "fixed_sql": "SELECT SUM(transaction_total)/COUNT(DISTINCT transaction_id) FROM transactions WHERE status='completed'",
+      "expected": [
+        [
+          100
+        ]
+      ]
+    }
+  ],
+  "evaluation": [
+    {
+      "id": "retail-01",
+      "question": "各区域有几家门店？",
+      "sql": "SELECT region,COUNT(*) AS stores FROM stores GROUP BY 1 ORDER BY 1",
+      "expected": [
+        [
+          "华东",
+          2
+        ],
+        [
+          "华北",
+          2
+        ],
+        [
+          "华南",
+          2
+        ]
+      ]
+    },
+    {
+      "id": "retail-02",
+      "question": "2025年第四季度各门店销售额是多少？",
+      "sql": "SELECT store_id,ROUND(SUM(transaction_total),2) AS sales FROM transactions WHERE status='completed' AND transaction_date>=DATE '2025-10-01' AND transaction_date<DATE '2026-01-01' GROUP BY 1 ORDER BY 1",
+      "expected": [
+        [
+          1,
+          35780
+        ],
+        [
+          2,
+          18100
+        ],
+        [
+          3,
+          33560
+        ],
+        [
+          4,
+          35940
+        ],
+        [
+          5,
+          34620
+        ],
+        [
+          6,
+          33580
+        ]
+      ]
+    },
+    {
+      "id": "retail-03",
+      "question": "2025年各品类销量是多少？",
+      "sql": "SELECT p.category,SUM(i.quantity) AS units FROM transaction_items i JOIN transactions t ON i.transaction_id=t.transaction_id JOIN products p ON i.product_id=p.product_id WHERE t.status='completed' AND t.transaction_date>=DATE '2025-01-01' GROUP BY 1 ORDER BY 1",
+      "expected": [
+        [
+          "日用",
+          8139
+        ],
+        [
+          "食品",
+          8267
+        ]
+      ]
+    },
+    {
+      "id": "retail-04",
+      "question": "截至2025年12月31日，各门店期末库存是多少？",
+      "sql": "WITH latest AS(SELECT *,ROW_NUMBER() OVER(PARTITION BY store_id,product_id ORDER BY snapshot_date DESC) rn FROM inventory_snapshots WHERE snapshot_date<=DATE '2025-12-31') SELECT store_id,SUM(stock_on_hand) AS stock FROM latest WHERE rn=1 GROUP BY 1 ORDER BY 1",
+      "expected": [
+        [
+          1,
+          118
+        ],
+        [
+          2,
+          122
+        ],
+        [
+          3,
+          126
+        ],
+        [
+          4,
+          130
+        ],
+        [
+          5,
+          134
+        ],
+        [
+          6,
+          138
+        ]
+      ]
+    },
+    {
+      "id": "retail-05",
+      "question": "2025年第四季度门店2有多少条零库存快照？",
+      "sql": "SELECT COUNT(*) AS zero_snapshots FROM inventory_snapshots WHERE store_id=2 AND stock_on_hand=0 AND snapshot_date>=DATE '2025-10-01'",
+      "expected": [
+        [
+          30
+        ]
+      ]
+    },
+    {
+      "id": "retail-06",
+      "question": "2025年各门店客流分别是多少？",
+      "sql": "SELECT store_id,SUM(visitors) AS footfall FROM footfall WHERE visit_date>=DATE '2025-01-01' GROUP BY 1 ORDER BY 1",
+      "expected": [
+        [
+          1,
+          48907
+        ],
+        [
+          2,
+          47512
+        ],
+        [
+          3,
+          52557
+        ],
+        [
+          4,
+          54382
+        ],
+        [
+          5,
+          56207
+        ],
+        [
+          6,
+          58032
+        ]
+      ]
+    },
+    {
+      "id": "retail-07",
+      "question": "2025年已完成交易的客单价是多少？",
+      "sql": "SELECT ROUND(SUM(transaction_total)/COUNT(DISTINCT transaction_id),2) AS aov FROM transactions WHERE status='completed' AND transaction_date>=DATE '2025-01-01'",
+      "expected": [
+        [
+          198.88
+        ]
+      ]
+    },
+    {
+      "id": "retail-08",
+      "question": "共有多少种商品？",
+      "sql": "SELECT COUNT(*) AS products FROM products",
+      "expected": [
+        [
+          4
+        ]
+      ]
+    },
+    {
+      "id": "retail-09",
+      "question": "2025年有多少笔作废交易？",
+      "sql": "SELECT COUNT(*) AS void_transactions FROM transactions WHERE status='void' AND transaction_date>=DATE '2025-01-01'",
+      "expected": [
+        [
+          187
+        ]
+      ]
+    },
+    {
+      "id": "retail-10",
+      "question": "2025年各区域毛利分别是多少？",
+      "sql": "SELECT s.region,ROUND(SUM(i.quantity*(i.unit_price-i.unit_cost)),2) AS gross_profit FROM transactions t JOIN transaction_items i ON t.transaction_id=i.transaction_id JOIN stores s ON t.store_id=s.store_id WHERE t.status='completed' AND t.transaction_date>=DATE '2025-01-01' GROUP BY 1 ORDER BY 1",
+      "expected": [
+        [
+          "华东",
+          117009
+        ],
+        [
+          "华北",
+          125316
+        ],
+        [
+          "华南",
+          124704
+        ]
+      ]
+    }
+  ],
+  "clarifications": [
+    {
+      "question": "哪些门店效率差？",
+      "answer": "比较2025年第四季度各门店日均销售额，并同时展示客单价与客流成交比。"
+    },
+    {
+      "question": "库存还有多少？",
+      "answer": "截至2025年12月31日，逐门店逐商品取最近库存快照，再按门店汇总。"
+    }
+  ]
+}

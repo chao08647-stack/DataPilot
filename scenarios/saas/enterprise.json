@@ -1,0 +1,792 @@
+{
+  "schema_version": "enterprise-2",
+  "enterprise": true,
+  "generator": "saas",
+  "synthetic": true,
+  "description": "获客、激活试用、实际支付及订阅收入业务域；通过成熟队列漏斗与有效期订阅快照诊断。",
+  "tables": [
+    {
+      "name": "business_calendar",
+      "description": "日期维度，月末快照以calendar_date为观测点",
+      "grain": "日期",
+      "columns": {
+        "calendar_date": "DATE",
+        "month_start": "DATE",
+        "is_month_end": "BOOLEAN"
+      }
+    },
+    {
+      "name": "acquisition_campaigns",
+      "description": "合成获客活动",
+      "grain": "活动",
+      "columns": {
+        "campaign_id": "INTEGER",
+        "channel": "VARCHAR",
+        "campaign_name": "VARCHAR"
+      }
+    },
+    {
+      "name": "account_attribution",
+      "description": "单一主来源归属，非多触点因果归因",
+      "grain": "账户",
+      "columns": {
+        "account_id": "INTEGER",
+        "campaign_id": "INTEGER"
+      }
+    },
+    {
+      "name": "feature_events",
+      "description": "账户首次价值事件及触发用户",
+      "grain": "事件",
+      "columns": {
+        "event_id": "INTEGER",
+        "account_id": "INTEGER",
+        "user_id": "INTEGER",
+        "event_date": "DATE",
+        "event_type": "VARCHAR",
+        "feature_name": "VARCHAR"
+      }
+    },
+    {
+      "name": "trials",
+      "description": "账户试用记录",
+      "grain": "试用",
+      "columns": {
+        "trial_id": "INTEGER",
+        "account_id": "INTEGER",
+        "start_date": "DATE",
+        "end_date": "DATE",
+        "status": "VARCHAR"
+      }
+    },
+    {
+      "name": "account_usage",
+      "description": "产品使用与错误事件聚合，不等于客户流失原因",
+      "grain": "账户×日期",
+      "columns": {
+        "account_id": "INTEGER",
+        "usage_date": "DATE",
+        "active_users": "INTEGER",
+        "critical_actions": "INTEGER",
+        "error_events": "INTEGER"
+      }
+    },
+    {
+      "name": "payment_attempts",
+      "description": "同一账单可多次支付尝试，success才是成功支付",
+      "grain": "尝试",
+      "columns": {
+        "attempt_id": "INTEGER",
+        "invoice_id": "INTEGER",
+        "attempt_date": "DATE",
+        "outcome": "VARCHAR",
+        "failure_reason": "VARCHAR"
+      }
+    },
+    {
+      "name": "subscription_versions",
+      "description": "订阅价格有效期版本；左闭右开，可有取消后的恢复区间",
+      "grain": "订阅版本",
+      "columns": {
+        "version_id": "INTEGER",
+        "subscription_id": "INTEGER",
+        "account_id": "INTEGER",
+        "effective_from": "DATE",
+        "effective_to": "DATE",
+        "monthly_price": "DOUBLE",
+        "plan": "VARCHAR",
+        "seats": "INTEGER"
+      }
+    }
+  ],
+  "relations": [
+    {
+      "left_table": "account_attribution",
+      "left_column": "account_id",
+      "right_table": "accounts",
+      "right_column": "account_id",
+      "cardinality": "many_to_one"
+    },
+    {
+      "left_table": "account_attribution",
+      "left_column": "campaign_id",
+      "right_table": "acquisition_campaigns",
+      "right_column": "campaign_id",
+      "cardinality": "many_to_one"
+    },
+    {
+      "left_table": "feature_events",
+      "left_column": "account_id",
+      "right_table": "accounts",
+      "right_column": "account_id",
+      "cardinality": "many_to_one"
+    },
+    {
+      "left_table": "feature_events",
+      "left_column": "user_id",
+      "right_table": "users",
+      "right_column": "user_id",
+      "cardinality": "many_to_one"
+    },
+    {
+      "left_table": "trials",
+      "left_column": "account_id",
+      "right_table": "accounts",
+      "right_column": "account_id",
+      "cardinality": "many_to_one"
+    },
+    {
+      "left_table": "account_usage",
+      "left_column": "account_id",
+      "right_table": "accounts",
+      "right_column": "account_id",
+      "cardinality": "many_to_one"
+    },
+    {
+      "left_table": "payment_attempts",
+      "left_column": "invoice_id",
+      "right_table": "invoices",
+      "right_column": "invoice_id",
+      "cardinality": "many_to_one"
+    },
+    {
+      "left_table": "subscription_versions",
+      "left_column": "subscription_id",
+      "right_table": "subscriptions",
+      "right_column": "subscription_id",
+      "cardinality": "many_to_one"
+    },
+    {
+      "left_table": "subscription_versions",
+      "left_column": "account_id",
+      "right_table": "accounts",
+      "right_column": "account_id",
+      "cardinality": "many_to_one"
+    },
+    {
+      "left_table": "business_calendar",
+      "left_column": "calendar_date",
+      "right_table": "subscription_versions",
+      "right_column": "effective_from",
+      "type": "temporal",
+      "end_column": "effective_to",
+      "end_inclusive": false,
+      "allow_open_end": true,
+      "description": "月末日期落在订阅版本有效区间，不能用任意非等值JOIN代替此批准关系。",
+      "cardinality": "many_to_many",
+      "preaggregation": "每个订阅在任意时点最多一个有效版本；先按时点账户汇总MRR，禁止与事件事实明细直接关联。"
+    }
+  ],
+  "metrics": [
+    {
+      "id": "mrr",
+      "name": "月度经常性收入",
+      "aliases": [
+        "MRR",
+        "月经常性收入"
+      ],
+      "expression": "SUM(subscription_versions.monthly_price)",
+      "description": "指定月末仍生效的订阅版本月价，effective_from<=时点且(effective_to为空或>时点)。已月度归一，不再次除12；需使用版本表处理升降级与恢复，而不是订阅主表当前字段。",
+      "tables": [
+        "subscription_versions",
+        "business_calendar"
+      ],
+      "columns": [
+        "monthly_price",
+        "effective_from",
+        "effective_to",
+        "calendar_date",
+        "is_month_end"
+      ],
+      "dimensions": [
+        "plan",
+        "account_id",
+        "industry"
+      ],
+      "time_column": "business_calendar.calendar_date",
+      "grain": "月末×有效订阅版本",
+      "unit": "元/月",
+      "filters": [
+        "effective_from<=时点",
+        "effective_to为空或>时点"
+      ],
+      "additivity": "semi_additive",
+      "non_additive_dimensions": [
+        "time"
+      ]
+    },
+    {
+      "id": "paid_funnel_rate",
+      "name": "成熟账户实际付费漏斗",
+      "aliases": [
+        "激活转化",
+        "实际付费漏斗"
+      ],
+      "expression": "paid_accounts/NULLIF(registered_accounts,0)",
+      "description": "同一注册账户成熟30日队列内，依次达到首次价值、试用、成功支付；账户去重，支付重试不能重复计人。与仅按订阅开通定义的30日转化分开。",
+      "tables": [
+        "accounts",
+        "feature_events",
+        "trials",
+        "invoices",
+        "payment_attempts"
+      ],
+      "columns": [
+        "account_id",
+        "signup_date",
+        "event_date",
+        "start_date",
+        "attempt_date",
+        "outcome"
+      ],
+      "dimensions": [
+        "acquisition_channel",
+        "industry",
+        "signup_date"
+      ],
+      "time_column": "accounts.signup_date",
+      "grain": "成熟注册账户队列",
+      "unit": "ratio",
+      "filters": [
+        "注册账户已完整观察30天",
+        "按first_value→trial→payment success顺序"
+      ],
+      "additivity": "ratio",
+      "denominator": "成熟30天的注册账户数"
+    },
+    {
+      "id": "nrr",
+      "name": "期初账户群净收入留存率",
+      "aliases": [
+        "NRR",
+        "净收入留存"
+      ],
+      "expression": "ending_mrr_of_start_accounts/NULLIF(starting_mrr,0)",
+      "description": "固定期初有正MRR的账户集合，其报告期MRR/期初MRR；允许扩张超过100%，不混入报告期新账户。",
+      "tables": [
+        "subscription_versions",
+        "subscriptions",
+        "business_calendar"
+      ],
+      "columns": [
+        "account_id",
+        "monthly_price",
+        "effective_from",
+        "effective_to",
+        "calendar_date"
+      ],
+      "dimensions": [
+        "plan",
+        "industry"
+      ],
+      "time_column": "business_calendar.calendar_date",
+      "grain": "期初账户群×月末",
+      "unit": "ratio",
+      "filters": [
+        "固定期初有正MRR账户群"
+      ],
+      "additivity": "ratio",
+      "denominator": "固定期初账户群的期初MRR"
+    },
+    {
+      "id": "cohort_week_retention",
+      "name": "注册队列周龄留存率",
+      "aliases": [
+        "Cohort留存",
+        "周龄留存"
+      ],
+      "expression": "retained_users_at_week_w/NULLIF(mature_cohort_users,0)",
+      "description": "按注册月份划分用户队列。周龄w的留存分子为注册后[7*w,7*w+6]天至少发生一次workspace_open的去重用户；多周比较统一使用已完整观察到最大周龄的成熟队列，保留样本量。第1/4/8周分别对应7-13/28-34/56-62天。",
+      "tables": [
+        "users",
+        "events"
+      ],
+      "columns": [
+        "user_id",
+        "signup_date",
+        "event_date",
+        "event_name"
+      ],
+      "dimensions": [
+        "signup_date",
+        "age"
+      ],
+      "time_column": "users.signup_date",
+      "grain": "注册用户队列×周龄",
+      "unit": "ratio",
+      "filters": [
+        "events.event_name='workspace_open'",
+        "注册用户已完整观察最大周龄"
+      ],
+      "additivity": "ratio",
+      "denominator": "相同最大观察窗口下的成熟注册用户数"
+    },
+    {
+      "id": "failed_payment_invoices",
+      "name": "支付失败影响账单数",
+      "aliases": [
+        "支付失败账单",
+        "支付失败原因"
+      ],
+      "expression": "COUNT(DISTINCT payment_attempts.invoice_id)",
+      "description": "按失败原因统计至少一次失败尝试的去重账单；同一账单可属于多个原因，不可跨原因直接合计去重账单数。失败后可能重试成功，不等于最终坏账。",
+      "tables": [
+        "payment_attempts"
+      ],
+      "columns": [
+        "invoice_id",
+        "failure_reason",
+        "outcome",
+        "attempt_date"
+      ],
+      "dimensions": [
+        "failure_reason"
+      ],
+      "time_column": "payment_attempts.attempt_date",
+      "grain": "失败原因×账单",
+      "unit": "账单",
+      "filters": [
+        "payment_attempts.outcome='failed'"
+      ],
+      "additivity": "non_additive"
+    }
+  ],
+  "business_knowledge": [
+    {
+      "id": "versioned-subscription",
+      "title": "历史MRR需使用版本有效期",
+      "content": "升降级或恢复后，订阅主表无法代表所有历史月价。历史MRR按subscription_versions左闭右开区间取值；期初/期末账户净变动与全期间事件毛额不同。",
+      "tags": [
+        "mrr"
+      ]
+    },
+    {
+      "id": "paid-funnel-boundary",
+      "title": "开通与收款转化分开",
+      "content": "订阅开通与真实成功支付是两种不同的转化定义。顺序漏斗只能使用同一成熟账户队列，并按账户去重支付重试；未成熟队列不算未转化。",
+      "tags": [
+        "conversion"
+      ]
+    }
+  ],
+  "dimensions": [
+    {
+      "id": "acquisition_channel",
+      "table": "accounts",
+      "column": "acquisition_channel",
+      "type": "category"
+    },
+    {
+      "id": "industry",
+      "table": "accounts",
+      "column": "industry",
+      "type": "category"
+    },
+    {
+      "id": "plan",
+      "table": "subscription_versions",
+      "column": "plan",
+      "type": "category"
+    },
+    {
+      "id": "account",
+      "table": "accounts",
+      "column": "account_id",
+      "type": "entity"
+    }
+  ],
+  "capabilities": [
+    "conversion_funnel",
+    "mrr_bridge",
+    "temporal_join",
+    "mature_cohort"
+  ],
+  "diagnostics": [
+    {
+      "id": "conversion-funnel",
+      "title": "成熟账户获客到实际支付漏斗",
+      "tags": [
+        "conversion",
+        "retention"
+      ],
+      "tool": "conversion_funnel",
+      "queries": [
+        {
+          "id": "funnel_input",
+          "sql": "WITH f AS(SELECT account_id,MIN(event_date) first_value FROM feature_events WHERE event_type='first_value' GROUP BY account_id),t AS(SELECT account_id,MIN(start_date) trial_started FROM trials GROUP BY account_id),p AS(SELECT i.account_id,MIN(a.attempt_date) paid_date FROM invoices i JOIN payment_attempts a ON i.invoice_id=a.invoice_id WHERE a.outcome='success' GROUP BY i.account_id) SELECT strftime(a.signup_date,'%Y-%m') period,date_trunc('month',a.signup_date)::DATE period_date,a.acquisition_channel AS \"group\",COUNT(*) registered,COUNT(*) FILTER(WHERE f.first_value>=a.signup_date AND f.first_value<=a.signup_date+INTERVAL '30 days') activated,COUNT(*) FILTER(WHERE f.first_value>=a.signup_date AND t.trial_started>=f.first_value AND t.trial_started<=a.signup_date+INTERVAL '30 days') trial_started,COUNT(*) FILTER(WHERE f.first_value>=a.signup_date AND t.trial_started>=f.first_value AND p.paid_date>=t.trial_started AND p.paid_date<=a.signup_date+INTERVAL '30 days') paid FROM accounts a LEFT JOIN f ON a.account_id=f.account_id LEFT JOIN t ON a.account_id=t.account_id LEFT JOIN p ON a.account_id=p.account_id WHERE date_trunc('month',a.signup_date)+INTERVAL '1 month'+INTERVAL '29 days'<=DATE '2025-12-31' GROUP BY 1,2,3 ORDER BY 1,3",
+          "metric_ids": [
+            "paid_funnel_rate"
+          ]
+        }
+      ],
+      "config": {
+        "query_id": "funnel_input",
+        "baseline_period": "2025-09",
+        "current_period": "2025-11"
+      }
+    },
+    {
+      "id": "subscription-mrr",
+      "title": "订阅收入净变动与客户使用线索",
+      "tags": [
+        "mrr",
+        "contribution"
+      ],
+      "tool": "mrr_bridge",
+      "queries": [
+        {
+          "id": "mrr_input",
+          "sql": "SELECT strftime(c.calendar_date,'%Y-%m-%d') period,c.calendar_date period_date,v.account_id,SUM(v.monthly_price) mrr,MIN(s.start_date) first_started FROM business_calendar c JOIN subscription_versions v ON c.calendar_date>=v.effective_from AND(c.calendar_date<v.effective_to OR v.effective_to IS NULL) JOIN subscriptions s ON v.subscription_id=s.subscription_id WHERE c.is_month_end AND c.calendar_date>=DATE '2025-09-01' GROUP BY c.calendar_date,v.account_id ORDER BY c.calendar_date,v.account_id",
+          "metric_ids": [
+            "mrr",
+            "nrr"
+          ]
+        },
+        {
+          "id": "usage_context",
+          "sql": "SELECT a.account_id,a.account_name,SUM(u.active_users) active_user_days,SUM(u.critical_actions) critical_actions,SUM(u.error_events) error_events FROM accounts a JOIN account_usage u ON a.account_id=u.account_id WHERE u.usage_date>=DATE '2025-07-01' GROUP BY a.account_id,a.account_name ORDER BY error_events DESC",
+          "metric_ids": [
+            "mau"
+          ]
+        }
+      ],
+      "config": {
+        "query_id": "mrr_input",
+        "baseline_period": "2025-09-30",
+        "current_period": "2025-12-31",
+        "complete_snapshot": true
+      }
+    }
+  ],
+  "dashboard_templates": [
+    {
+      "id": "subscription-operating",
+      "title": "产品增长与订阅收入看板",
+      "cards": [
+        {
+          "id": "mature-funnel",
+          "title": "成熟账户漏斗",
+          "chart": {
+            "type": "funnel",
+            "x": "stage",
+            "y": [
+              "accounts"
+            ]
+          },
+          "query": {
+            "sql": "WITH f AS(SELECT account_id,MIN(event_date) first_value FROM feature_events WHERE event_type='first_value' GROUP BY account_id),t AS(SELECT account_id,MIN(start_date) trial_started FROM trials GROUP BY account_id),p AS(SELECT i.account_id,MIN(a.attempt_date) paid_date FROM invoices i JOIN payment_attempts a ON i.invoice_id=a.invoice_id WHERE a.outcome='success' GROUP BY i.account_id) SELECT strftime(a.signup_date,'%Y-%m') period,date_trunc('month',a.signup_date)::DATE period_date,a.acquisition_channel AS \"group\",COUNT(*) registered,COUNT(*) FILTER(WHERE f.first_value>=a.signup_date AND f.first_value<=a.signup_date+INTERVAL '30 days') activated,COUNT(*) FILTER(WHERE f.first_value>=a.signup_date AND t.trial_started>=f.first_value AND t.trial_started<=a.signup_date+INTERVAL '30 days') trial_started,COUNT(*) FILTER(WHERE f.first_value>=a.signup_date AND t.trial_started>=f.first_value AND p.paid_date>=t.trial_started AND p.paid_date<=a.signup_date+INTERVAL '30 days') paid FROM accounts a LEFT JOIN f ON a.account_id=f.account_id LEFT JOIN t ON a.account_id=t.account_id LEFT JOIN p ON a.account_id=p.account_id WHERE date_trunc('month',a.signup_date)+INTERVAL '1 month'+INTERVAL '29 days'<=DATE '2025-12-31' GROUP BY 1,2,3 ORDER BY 1,3",
+            "metric_ids": [
+              "paid_funnel_rate"
+            ],
+            "filter_bindings": {
+              "date_from": "period_date",
+              "date_to": "period_date",
+              "acquisition_channel": "group"
+            },
+            "id": "mature-funnel_input",
+            "filter_grain": "month"
+          },
+          "analysis_recipe": {
+            "tool": "conversion_funnel",
+            "config": {}
+          },
+          "layout": {
+            "width": 6,
+            "order": 0
+          }
+        },
+        {
+          "id": "mrr-bridge",
+          "title": "MRR净变动桥接",
+          "chart": {
+            "type": "waterfall",
+            "x": "component",
+            "y": [
+              "delta"
+            ]
+          },
+          "query": {
+            "sql": "SELECT strftime(c.calendar_date,'%Y-%m-%d') period,c.calendar_date period_date,v.account_id,SUM(v.monthly_price) mrr,MIN(s.start_date) first_started FROM business_calendar c JOIN subscription_versions v ON c.calendar_date>=v.effective_from AND(c.calendar_date<v.effective_to OR v.effective_to IS NULL) JOIN subscriptions s ON v.subscription_id=s.subscription_id WHERE c.is_month_end AND c.calendar_date>=DATE '2025-09-01' GROUP BY c.calendar_date,v.account_id ORDER BY c.calendar_date,v.account_id",
+            "metric_ids": [
+              "mrr",
+              "nrr"
+            ],
+            "filter_bindings": {
+              "date_from": "period_date",
+              "date_to": "period_date"
+            },
+            "id": "mrr-bridge_input",
+            "filter_grain": "month_end"
+          },
+          "analysis_recipe": {
+            "tool": "mrr_bridge",
+            "config": {
+              "complete_snapshot": true
+            }
+          },
+          "layout": {
+            "width": 12,
+            "order": 1
+          }
+        },
+        {
+          "id": "mrr-kpi",
+          "title": "2025年11月末MRR",
+          "chart": {
+            "type": "kpi",
+            "y": [
+              "mrr"
+            ]
+          },
+          "query": {
+            "id": "mrr-kpi_input",
+            "sql": "SELECT SUM(monthly_price) mrr FROM subscription_versions WHERE effective_from<=DATE '2025-11-30' AND(effective_to>DATE '2025-11-30' OR effective_to IS NULL)",
+            "metric_ids": [
+              "mrr"
+            ],
+            "filter_bindings": {}
+          },
+          "layout": {
+            "width": 6,
+            "order": 2
+          }
+        },
+        {
+          "id": "mrr-trend",
+          "title": "月末MRR趋势",
+          "chart": {
+            "type": "line",
+            "x": "period_date",
+            "y": [
+              "mrr"
+            ]
+          },
+          "query": {
+            "id": "mrr-trend_input",
+            "sql": "SELECT c.calendar_date period_date,SUM(v.monthly_price) mrr FROM business_calendar c JOIN subscription_versions v ON c.calendar_date>=v.effective_from AND(c.calendar_date<v.effective_to OR v.effective_to IS NULL) WHERE c.is_month_end GROUP BY c.calendar_date ORDER BY c.calendar_date",
+            "metric_ids": [
+              "mrr"
+            ],
+            "filter_bindings": {
+              "date_from": "period_date",
+              "date_to": "period_date"
+            },
+            "filter_grain": "month_end"
+          },
+          "layout": {
+            "width": 12,
+            "order": 3
+          }
+        },
+        {
+          "id": "retention-cohort",
+          "title": "用户注册月×周龄留存（成熟队列）",
+          "chart": {
+            "type": "heatmap",
+            "x": "period_date",
+            "y": [
+              "retention_pct"
+            ],
+            "group_by": "age",
+            "unit": "%"
+          },
+          "query": {
+            "id": "retention-cohort_input",
+            "sql": "WITH observed AS(SELECT u.user_id,u.signup_date,MAX(CASE WHEN e.event_date>=u.signup_date+INTERVAL '7 days' AND e.event_date<u.signup_date+INTERVAL '14 days' THEN 1 ELSE 0 END) w1,MAX(CASE WHEN e.event_date>=u.signup_date+INTERVAL '28 days' AND e.event_date<u.signup_date+INTERVAL '35 days' THEN 1 ELSE 0 END) w4,MAX(CASE WHEN e.event_date>=u.signup_date+INTERVAL '56 days' AND e.event_date<u.signup_date+INTERVAL '63 days' THEN 1 ELSE 0 END) w8 FROM users u LEFT JOIN events e ON u.user_id=e.user_id WHERE u.signup_date+INTERVAL '62 days'<=DATE '2025-12-31' GROUP BY u.user_id,u.signup_date) SELECT date_trunc('month',signup_date)::DATE period_date,'第1周' age,100.0*SUM(w1)/COUNT(*) retention_pct,COUNT(*) sample_size FROM observed GROUP BY 1 UNION ALL SELECT date_trunc('month',signup_date)::DATE period_date,'第4周' age,100.0*SUM(w4)/COUNT(*) retention_pct,COUNT(*) sample_size FROM observed GROUP BY 1 UNION ALL SELECT date_trunc('month',signup_date)::DATE period_date,'第8周' age,100.0*SUM(w8)/COUNT(*) retention_pct,COUNT(*) sample_size FROM observed GROUP BY 1 ORDER BY 1,2",
+            "metric_ids": [
+              "cohort_week_retention"
+            ],
+            "filter_bindings": {
+              "date_from": "period_date",
+              "date_to": "period_date"
+            },
+            "filter_grain": "month"
+          },
+          "layout": {
+            "width": 12,
+            "order": 4
+          }
+        },
+        {
+          "id": "payment-issues",
+          "title": "支付失败原因（账单去重）",
+          "chart": {
+            "type": "bar",
+            "x": "failure_reason",
+            "y": [
+              "affected_invoices"
+            ],
+            "unit": "账单"
+          },
+          "query": {
+            "id": "payment-issues_input",
+            "sql": "SELECT failure_reason,COUNT(DISTINCT invoice_id) affected_invoices FROM payment_attempts WHERE outcome='failed' GROUP BY failure_reason ORDER BY affected_invoices DESC",
+            "metric_ids": [
+              "failed_payment_invoices"
+            ],
+            "filter_bindings": {}
+          },
+          "layout": {
+            "width": 12,
+            "order": 5
+          }
+        }
+      ]
+    }
+  ],
+  "evaluation": [
+    {
+      "id": "saas-04",
+      "question": "2025年12月31日MRR是多少？",
+      "sql": "SELECT SUM(monthly_price) AS mrr FROM subscription_versions WHERE effective_from<=DATE '2025-12-31' AND(effective_to IS NULL OR effective_to>DATE '2025-12-31')",
+      "expected": [
+        [
+          36800
+        ]
+      ]
+    },
+    {
+      "id": "saas-11",
+      "question": "各获客活动归属多少账户？",
+      "sql": "SELECT c.campaign_name,COUNT(*) accounts FROM acquisition_campaigns c JOIN account_attribution a ON c.campaign_id=a.campaign_id GROUP BY 1 ORDER BY 1",
+      "expected": [
+        [
+          "付费注册",
+          120
+        ],
+        [
+          "内容注册",
+          120
+        ]
+      ]
+    },
+    {
+      "id": "saas-12",
+      "question": "2025年各来源首次价值激活账户数？",
+      "sql": "SELECT a.acquisition_channel,COUNT(DISTINCT f.account_id) activated FROM accounts a JOIN feature_events f ON a.account_id=f.account_id WHERE a.signup_date>=DATE '2025-01-01' GROUP BY 1 ORDER BY 1",
+      "expected": [
+        [
+          "推广",
+          42
+        ],
+        [
+          "自然流量",
+          45
+        ]
+      ]
+    },
+    {
+      "id": "saas-13",
+      "question": "2025年第四季度注册账户中开始试用的账户数？",
+      "sql": "SELECT COUNT(DISTINCT t.account_id) trial_accounts FROM accounts a JOIN trials t ON a.account_id=t.account_id WHERE a.signup_date>=DATE '2025-10-01'",
+      "expected": [
+        [
+          12
+        ]
+      ]
+    },
+    {
+      "id": "saas-14",
+      "question": "各支付结果有多少次尝试？",
+      "sql": "SELECT outcome,COUNT(*) attempts FROM payment_attempts GROUP BY 1 ORDER BY 1",
+      "expected": [
+        [
+          "failed",
+          256
+        ],
+        [
+          "success",
+          854
+        ]
+      ]
+    },
+    {
+      "id": "saas-15",
+      "question": "2025年10月1日发生多少次套餐扩张或收缩事件？",
+      "sql": "SELECT change_type,COUNT(*) changes FROM subscription_changes WHERE change_date=DATE '2025-10-01' AND change_type IN ('expanded','contracted') GROUP BY 1 ORDER BY 1",
+      "expected": [
+        [
+          "contracted",
+          38
+        ],
+        [
+          "expanded",
+          19
+        ]
+      ]
+    },
+    {
+      "id": "saas-16",
+      "question": "2025年11月恢复订阅的MRR合计？",
+      "sql": "SELECT SUM(new_mrr) restored_mrr FROM subscription_changes WHERE change_type='reactivated' AND change_date>=DATE '2025-11-01' AND change_date<DATE '2025-12-01'",
+      "expected": [
+        [
+          1800
+        ]
+      ]
+    },
+    {
+      "id": "saas-17",
+      "question": "2025年9月30日有效版本的MRR是多少？",
+      "sql": "SELECT SUM(monthly_price) mrr FROM subscription_versions WHERE effective_from<=DATE '2025-09-30' AND(effective_to IS NULL OR effective_to>DATE '2025-09-30')",
+      "expected": [
+        [
+          34200
+        ]
+      ]
+    },
+    {
+      "id": "saas-18",
+      "question": "2025年各行业产品关键动作数？",
+      "sql": "SELECT a.industry,SUM(u.critical_actions) actions FROM account_usage u JOIN accounts a ON u.account_id=a.account_id WHERE u.usage_date>=DATE '2025-01-01' GROUP BY 1 ORDER BY 1",
+      "expected": [
+        [
+          "内容",
+          11830
+        ],
+        [
+          "科技",
+          9000
+        ],
+        [
+          "零售",
+          8451
+        ]
+      ]
+    },
+    {
+      "id": "saas-19",
+      "question": "2025年第四季度各失败原因支付尝试数？",
+      "sql": "SELECT failure_reason,COUNT(*) failures FROM payment_attempts WHERE outcome='failed' AND attempt_date>=DATE '2025-10-01' GROUP BY 1 ORDER BY 1",
+      "expected": [
+        [
+          "余额不足",
+          20
+        ],
+        [
+          "银行拒付",
+          35
+        ]
+      ]
+    },
+    {
+      "id": "saas-20",
+      "question": "2025年12月末各套餐有效账户数？",
+      "sql": "SELECT plan,COUNT(DISTINCT account_id) accounts FROM subscription_versions WHERE effective_from<=DATE '2025-12-31' AND(effective_to IS NULL OR effective_to>DATE '2025-12-31') GROUP BY 1 ORDER BY 1",
+      "expected": [
+        [
+          "专业版",
+          41
+        ],
+        [
+          "团队版",
+          41
+        ],
+        [
+          "基础版",
+          40
+        ]
+      ]
+    }
+  ]
+}

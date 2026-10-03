@@ -1,0 +1,190 @@
+import { test, expect } from '@playwright/test';
+import { enterpriseApi } from './fixtures.mjs';
+
+test('analysis is default; catalog only fills a question and saved run GET survives refresh', async ({ page }, testInfo) => {
+  const { requests } = await enterpriseApi(page);
+  const errors = []; page.on('pageerror', error => errors.push(error.message));
+  await page.goto('/');
+  await expect(page.getByRole('navigation', { name: '高阶功能' }).getByRole('button')).toHaveCount(3);
+  await expect(page.getByLabel('当前业务域')).toHaveValue('supply-chain');
+  await expect(page.getByRole('heading', { name: '今天，想分析什么？' })).toBeVisible();
+  await expect(page.getByRole('button', { name: '示例回放', exact: true })).toHaveCount(0);
+  await page.locator('.question-catalog button').first().click();
+  await expect(page.getByLabel('分析问题', { exact: true })).toHaveValue('比较各地区履约成本');
+  await page.locator('.recent-run').first().click();
+  await expect(page.locator('.chart-canvas canvas')).toHaveCount(3);
+  await page.locator('.evidence-panel>summary').click();
+  await expect(page.locator('.sql-code').first()).toContainText('SELECT');
+  await page.reload();
+  await expect(page.locator('.run-status')).toHaveText('已完成');
+  await page.screenshot({ path: testInfo.outputPath('analysis-light.png'), fullPage: true });
+  expect(requests.filter(request => request.method !== 'GET')).toEqual([]);
+  expect(requests.filter(request => request.path.startsWith('/scenarios/'))).toEqual([]);
+  expect(errors).toEqual([]);
+});
+test('existing thread restores without POST; domain switch clears task and disables replay', async ({ page }) => {
+  const { requests } = await enterpriseApi(page);
+  await page.goto('/#analysis');
+  await page.locator('.recent-run').first().click();
+  await expect(page.locator('.run-status')).toHaveText('已完成');
+  await page.getByRole('button', { name: '查看分析过程', exact: true }).click();
+  await expect(page.locator('.trace-event')).toHaveCount(1);
+  await page.getByRole('button', { name: '关闭分析过程', exact: true }).click();
+  await page.reload();
+  await expect(page.locator('.run-status')).toHaveText('已完成');
+  await page.getByLabel('当前业务域').selectOption('finance-custom');
+  await expect(page.locator('.run-status')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: '示例回放', exact: true })).toHaveCount(0);
+  const session = await page.evaluate(() => JSON.parse(localStorage.getItem('insight-agents.workspace.v1')));
+  expect(session?.threadId).toBeUndefined(); expect(session?.runId).toBeUndefined();
+  expect(requests.filter(request => request.method !== 'GET')).toEqual([]);
+});
+test('HITL resumes existing run, SSE IDs dedupe and stream.closed stops reconnect', async ({ page }) => {
+  const { state, requests } = await enterpriseApi(page);
+  await page.goto('/#analysis');
+  await page.getByLabel('分析问题', { exact: true }).fill('测试跨表分析');
+  await page.getByRole('button', { name: '发送分析问题' }).click();
+  await expect(page.locator('.clarification-card')).toContainText('哪个时间口径');
+  await page.getByLabel('补充说明').fill('按履约完成日期');
+  await page.getByRole('button', { name: '补充并继续' }).click();
+  await expect(page.locator('.run-status')).toHaveText('已完成');
+  await page.getByRole('button', { name: '查看分析过程', exact: true }).click();
+  await expect(page.locator('.trace-event')).toHaveCount(1);
+  await page.getByRole('button', { name: '关闭分析过程', exact: true }).click();
+  expect(requests.filter(request => request.path === '/runs' && request.method === 'POST')).toHaveLength(1);
+  expect(requests.filter(request => request.path.endsWith('/resume'))).toHaveLength(1);
+  expect(state.streamCalls).toBe(1);
+  await page.reload();
+  await expect(page.locator('.run-status')).toHaveText('已完成');
+  expect(state.streamCalls).toBe(1);
+});
+test('data source stores env reference, both model consents default off', async ({ page }) => {
+  const { requests } = await enterpriseApi(page);
+  await page.goto('/#data');
+  await page.getByRole('button', { name: '接入数据源', exact: true }).click();
+  const form = page.locator('.enterprise-modal');
+  await form.getByLabel('名称', { exact: true }).fill('新只读库');
+  await form.getByLabel('数据库', { exact: true }).fill('warehouse');
+  await form.getByLabel('只读用户名').fill('analytics_reader');
+  await form.getByLabel('密码环境变量名称').fill('WAREHOUSE_PASSWORD');
+  await expect(form.getByRole('checkbox').nth(0)).not.toBeChecked();
+  await expect(form.getByRole('checkbox').nth(1)).not.toBeChecked();
+  await form.getByRole('button', { name: '保存数据源' }).click();
+  await expect(page.locator('.source-card')).toHaveCount(3);
+  const payload = requests.find(request => request.path === '/data-sources' && request.method === 'POST').body;
+  expect(payload.config.password_env).toBe('WAREHOUSE_PASSWORD'); expect(payload.config).not.toHaveProperty('password');
+  expect(payload.model_access).toEqual({ metadata: false, results: false });
+});
+test('metadata-selected draft is separate from publication and requires confirmation', async ({ page }) => {
+  const { requests } = await enterpriseApi(page);
+  await page.goto('/#data');
+  await page.getByRole('tab', { name: '语义模型', exact: true }).click();
+  await page.getByRole('button', { name: '从真实元数据选表' }).click();
+  await page.locator('.metadata-table input').check();
+  await page.getByRole('button', { name: '用于当前业务域草稿' }).click();
+  await expect(page.getByLabel('语义模型 JSON')).toContainText('approved_costs');
+  await expect(page.getByRole('button', { name: '确认并发布' })).toBeDisabled();
+  await page.getByRole('button', { name: '保存为新草稿' }).click();
+  await expect(page.getByRole('button', { name: '确认并发布' })).toBeEnabled();
+  page.once('dialog', dialog => dialog.dismiss());
+  await page.getByRole('button', { name: '确认并发布' }).click();
+  expect(requests.filter(request => request.path.endsWith('/publish'))).toHaveLength(0);
+  page.once('dialog', dialog => dialog.accept());
+  await page.getByRole('button', { name: '确认并发布' }).click();
+  await expect(page.getByRole('button', { name: '确认并发布' })).toBeDisabled();
+  expect(requests.filter(request => request.path.endsWith('/publish'))).toHaveLength(1);
+});
+test('knowledge preferences retain opt-in controls and skills are inspectable', async ({ page }) => {
+  await enterpriseApi(page);
+  await page.goto('/');
+  await page.getByRole('navigation', { name: '高阶功能' }).getByRole('button', { name: '知识与偏好' }).click();
+  await expect(page.getByRole('switch')).toHaveAttribute('aria-checked', 'false');
+  await page.getByRole('switch').click();
+  await expect(page.getByRole('switch')).toHaveAttribute('aria-checked', 'true');
+  await page.getByRole('button', { name: '编辑月度展示模板' }).click();
+  await page.getByLabel('偏好值（JSON）').fill('"bar"');
+  await page.getByRole('button', { name: '保存修改' }).click();
+  await expect(page.locator('.preference-value')).toContainText('bar');
+  await page.getByRole('button', { name: '内置 Skills', exact: true }).click();
+  await expect(page.locator('.skill-card')).toContainText('跨表粒度检查');
+});
+test('investigation, finding certainty and deterministic calculation evidence remain distinct', async ({ page }) => {
+  const { state } = await enterpriseApi(page);
+  state.run.artifacts.investigation = { steps: [{ objective: '先核对净额，再分解变动', grain: '月份与地区', metric_ids: ['net'], dimensions: ['region'] }], evidence_needed: ['独立核对来源汇总'] };
+  state.run.artifacts.calculations = [{ tool: 'profit_bridge', method: '逐项差额桥接，非因果分析', facts: [{ name: '净变化', value: 30, unit: '元', evidence_ids: ['q1'] }], reconciliation: { balanced: true, residual: 0 }, limitations: ['不包含未提供费用'] }];
+  state.run.artifacts.analysis.findings = [{ title: '需要核对的解释', detail: '假设来自费用结构变化。', kind: 'hypothesis', business_objects: ['华东地区'], evidence_ids: ['q1'] }];
+  state.run.events.push({ event_id: 2, type: 'analysis.tool_used', payload: { tool: 'profit_bridge' } });
+  await page.goto('/#analysis');
+  await page.locator('.recent-run').first().click();
+  await page.locator('.evidence-panel>summary').click();
+  await page.locator('.investigation-panel summary').click();
+  await expect(page.locator('.investigation-panel')).toContainText('独立核对来源汇总');
+  await expect(page.locator('.finding-kind')).toHaveText('待验证假设');
+  await expect(page.locator('.business-object-tags')).toContainText('华东地区');
+  await page.locator('.calculation-panel>summary').click();
+  await expect(page.locator('.calculation-method')).toContainText('非因果分析');
+  await page.locator('.calculation-reconciliation summary').click();
+  await expect(page.locator('.calculation-reconciliation')).toContainText('balanced');
+  await expect(page.locator('.calculation-limitations')).toContainText('不包含未提供费用');
+  await page.getByRole('button', { name: '查看分析过程', exact: true }).click();
+  await expect(page.locator('.trace-event').last()).toContainText('执行分析计算');
+});
+
+test('backend unavailable is visible and never creates a fake answer', async ({ page }) => {
+  const { requests } = await enterpriseApi(page, { unready: true });
+  await page.goto('/#analysis');
+  await expect(page.getByLabel('分析问题', { exact: true })).toBeDisabled();
+  await expect(page.locator('.warning-notice')).toContainText('PostgreSQL 未就绪');
+  await expect(page.locator('.result-section')).toHaveCount(0);
+  expect(requests.filter(request => request.method !== 'GET')).toEqual([]);
+});
+
+test('503 after submit is explicit and never retries a task or manufactures results', async ({ page }) => {
+  const { requests } = await enterpriseApi(page, { rejectRuns: true });
+  await page.goto('/#analysis');
+  await page.getByLabel('分析问题', { exact: true }).fill('检查服务异常');
+  await page.getByRole('button', { name: '发送分析问题' }).click();
+  await expect(page.getByRole('alert')).toContainText('服务尚未就绪');
+  await expect(page.locator('.result-section')).toHaveCount(0);
+  expect(requests.filter(request => request.path === '/runs' && request.method === 'POST')).toHaveLength(1);
+});
+
+test('cancel ends the existing waiting task without creating another run', async ({ page }) => {
+  const { requests } = await enterpriseApi(page);
+  await page.goto('/#analysis');
+  await page.getByLabel('分析问题', { exact: true }).fill('稍后再分析');
+  await page.getByRole('button', { name: '发送分析问题' }).click();
+  await page.getByRole('button', { name: '取消任务', exact: true }).click();
+  await expect(page.locator('.run-status')).toHaveText('已取消');
+  expect(requests.filter(request => request.path === '/runs' && request.method === 'POST')).toHaveLength(1);
+  expect(requests.filter(request => request.method === 'DELETE')).toHaveLength(1);
+});
+
+test('missing chart values remain missing and HTML-like result text stays escaped', async ({ page }) => {
+  const { state } = await enterpriseApi(page);
+  state.run.artifacts.queries[1].rows[1][1] = null;
+  state.run.artifacts.charts[1].title = '<img src=x onerror=alert(1)>';
+  await page.goto('/#analysis');
+  await page.locator('.recent-run').first().click();
+  await expect(page.locator('.chart-data-warning')).toContainText('不将缺失值补为 0');
+  await expect(page.locator('.chart-card').nth(1).locator('h2')).toHaveText('<img src=x onerror=alert(1)>');
+  await expect(page.locator('.chart-card img')).toHaveCount(0);
+});
+
+test('new arbitrary business domain stays unpublished and cannot run or invent replay', async ({ page }) => {
+  const { requests } = await enterpriseApi(page);
+  await page.goto('/#data');
+  await page.getByRole('tab', { name: '业务域', exact: true }).click();
+  await page.getByRole('button', { name: '建立业务域', exact: true }).click();
+  await page.getByLabel('业务域名称').fill('区域物流复盘');
+  await page.getByLabel('资源标识').fill('logistics-custom');
+  await page.getByLabel('绑定数据源').selectOption('fixture-pg');
+  await page.locator('.enterprise-modal').getByRole('button', { name: '建立业务域', exact: true }).click();
+  await expect(page.getByLabel('当前业务域')).toHaveValue('logistics-custom');
+  await expect(page.getByLabel('语义模型 JSON')).toContainText('logistics-custom');
+  await page.getByRole('button', { name: '返回分析', exact: true }).click();
+  await expect(page.getByLabel('分析问题', { exact: true })).toBeDisabled();
+  await expect(page.getByRole('button', { name: '示例回放', exact: true })).toHaveCount(0);
+  expect(requests.find(request => request.path === '/domains' && request.method === 'POST').body.data_source_id).toBe('fixture-pg');
+  expect(requests.filter(request => request.path === '/runs' && request.method === 'POST')).toEqual([]);
+});

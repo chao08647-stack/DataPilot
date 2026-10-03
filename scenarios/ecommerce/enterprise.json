@@ -1,0 +1,875 @@
+{
+  "schema_version": "enterprise-2",
+  "enterprise": true,
+  "generator": "ecommerce",
+  "synthetic": true,
+  "description": "交易、营销、履约、售后与供应商业务域的合成企业模板；支持订单队列贡献利润桥接和履约退款诊断。",
+  "tables": [
+    {
+      "name": "suppliers",
+      "description": "商品供应商",
+      "grain": "供应商",
+      "columns": {
+        "supplier_id": "INTEGER",
+        "supplier_name": "VARCHAR",
+        "region": "VARCHAR"
+      }
+    },
+    {
+      "name": "product_batches",
+      "description": "商品批次及供货方；批次关联不证明供应商责任",
+      "grain": "批次",
+      "columns": {
+        "batch_id": "INTEGER",
+        "product_id": "INTEGER",
+        "supplier_id": "INTEGER",
+        "available_from": "DATE"
+      }
+    },
+    {
+      "name": "order_item_batches",
+      "description": "成交明细与批次映射",
+      "grain": "订单明细",
+      "columns": {
+        "item_id": "INTEGER",
+        "batch_id": "INTEGER"
+      }
+    },
+    {
+      "name": "campaigns",
+      "description": "营销活动有效时间与渠道",
+      "grain": "活动",
+      "columns": {
+        "campaign_id": "INTEGER",
+        "channel": "VARCHAR",
+        "campaign_name": "VARCHAR",
+        "start_date": "DATE",
+        "end_date": "DATE"
+      }
+    },
+    {
+      "name": "order_promotions",
+      "description": "订单实际分摊折扣，订单金额已扣该折扣",
+      "grain": "订单",
+      "columns": {
+        "order_id": "INTEGER",
+        "campaign_id": "INTEGER",
+        "discount_amount": "DOUBLE"
+      }
+    },
+    {
+      "name": "shipments",
+      "description": "合成履约承诺及签收事实",
+      "grain": "包裹",
+      "columns": {
+        "shipment_id": "INTEGER",
+        "order_id": "INTEGER",
+        "promised_date": "DATE",
+        "delivered_date": "DATE",
+        "carrier": "VARCHAR"
+      }
+    },
+    {
+      "name": "fulfillment_costs",
+      "description": "订单履约费用与支付费用，不含公司固定管理费",
+      "grain": "费用账单",
+      "columns": {
+        "cost_id": "INTEGER",
+        "shipment_id": "INTEGER",
+        "shipping_cost": "DOUBLE",
+        "payment_fee": "DOUBLE"
+      }
+    },
+    {
+      "name": "return_cases",
+      "description": "售后原因是登记信息，不是最终因果判定",
+      "grain": "售后申请",
+      "columns": {
+        "case_id": "INTEGER",
+        "refund_id": "INTEGER",
+        "reason": "VARCHAR",
+        "case_state": "VARCHAR",
+        "item_id": "INTEGER"
+      }
+    }
+  ],
+  "relations": [
+    {
+      "left_table": "product_batches",
+      "left_column": "product_id",
+      "right_table": "products",
+      "right_column": "product_id",
+      "cardinality": "many_to_one"
+    },
+    {
+      "left_table": "product_batches",
+      "left_column": "supplier_id",
+      "right_table": "suppliers",
+      "right_column": "supplier_id",
+      "cardinality": "many_to_one"
+    },
+    {
+      "left_table": "order_item_batches",
+      "left_column": "item_id",
+      "right_table": "order_items",
+      "right_column": "item_id",
+      "cardinality": "many_to_one"
+    },
+    {
+      "left_table": "order_item_batches",
+      "left_column": "batch_id",
+      "right_table": "product_batches",
+      "right_column": "batch_id",
+      "cardinality": "many_to_one"
+    },
+    {
+      "left_table": "refunds",
+      "left_column": "item_id",
+      "right_table": "order_item_batches",
+      "right_column": "item_id",
+      "cardinality": "many_to_one"
+    },
+    {
+      "left_table": "order_promotions",
+      "left_column": "order_id",
+      "right_table": "orders",
+      "right_column": "order_id",
+      "cardinality": "many_to_one"
+    },
+    {
+      "left_table": "order_promotions",
+      "left_column": "campaign_id",
+      "right_table": "campaigns",
+      "right_column": "campaign_id",
+      "cardinality": "many_to_one"
+    },
+    {
+      "left_table": "shipments",
+      "left_column": "order_id",
+      "right_table": "orders",
+      "right_column": "order_id",
+      "cardinality": "many_to_one"
+    },
+    {
+      "left_table": "fulfillment_costs",
+      "left_column": "shipment_id",
+      "right_table": "shipments",
+      "right_column": "shipment_id",
+      "cardinality": "many_to_one"
+    },
+    {
+      "left_table": "return_cases",
+      "left_column": "refund_id",
+      "right_table": "refunds",
+      "right_column": "refund_id",
+      "cardinality": "many_to_one"
+    },
+    {
+      "left_table": "return_cases",
+      "left_column": "item_id",
+      "right_table": "order_items",
+      "right_column": "item_id",
+      "cardinality": "many_to_one"
+    }
+  ],
+  "metrics": [
+    {
+      "id": "contribution_profit",
+      "name": "订单队列贡献利润",
+      "aliases": [
+        "订单队列贡献利润"
+      ],
+      "expression": "gross_sales-discounts-refunds-cogs-fulfillment-payment_fees-marketing",
+      "description": "按订单日期×渠道归属并分别预聚合。此指标的gross_sales是折扣前标价成交额，明确使用SUM(order_items.quantity*products.list_price)，不是另一个sales指标的实收销售额；不可换为unit_price后再次扣折扣。本合成模板商品标价固定，真实企业需配置历史标价。分别扣除已分摊折扣、队列成功退款、成交成本、履约、支付及同期推广支出。只比较月末距数据截止日至少30天的完整月份；截止2025-12-31时2025-11及更早月份已成熟，12月未成熟。不是财务权责收入或公司净利润。",
+      "component_formulas": {
+        "gross_sales": "SUM(order_items.quantity*products.list_price)",
+        "discounts": "SUM(order_promotions.discount_amount)",
+        "refunds": "SUM(refunds.refund_amount) WHERE refunds.status='completed'",
+        "cogs": "SUM(order_items.quantity*order_items.unit_cost)",
+        "fulfillment": "SUM(fulfillment_costs.shipping_cost)",
+        "payment_fees": "SUM(fulfillment_costs.payment_fee)",
+        "marketing": "SUM(marketing_spend.spend)"
+      },
+      "coverage_rule": "本模板marketing_spend是完整日期×渠道驱动表，包括零推广支出的organic渠道；按订单日期与渠道两键关联各预聚合事实。该覆盖前提不可套用于未声明完整日历的外部数据源。",
+      "tables": [
+        "orders",
+        "order_items",
+        "products",
+        "order_promotions",
+        "refunds",
+        "shipments",
+        "fulfillment_costs",
+        "marketing_spend"
+      ],
+      "columns": [
+        "order_date",
+        "channel",
+        "quantity",
+        "list_price",
+        "unit_cost",
+        "discount_amount",
+        "refund_amount",
+        "shipping_cost",
+        "payment_fee",
+        "spend"
+      ],
+      "dimensions": [
+        "channel",
+        "period"
+      ],
+      "time_column": "orders.order_date",
+      "grain": "订单队列×日期×渠道",
+      "unit": "元",
+      "filters": [
+        "orders.status='completed'",
+        "refunds.status='completed'",
+        "完整成熟30天订单月份"
+      ],
+      "additivity": "additive"
+    },
+    {
+      "id": "mature_refund_rate",
+      "name": "成熟订单退款率",
+      "aliases": [
+        "成熟订单退款率"
+      ],
+      "expression": "COUNT(DISTINCT refunded_order_id)/NULLIF(COUNT(DISTINCT order_id),0)",
+      "description": "一般总体指标：以订单日期形成至少观察30天的完成订单队列，成功退款订单去重为分子，完成订单为分母；不因物流缺失或未签收排除订单。若限定下单后30日退款必须显式说明退款窗口。履约关联诊断另用delivered_cohort_refund_rate，不能混用分母。",
+      "tables": [
+        "orders",
+        "refunds"
+      ],
+      "columns": [
+        "order_id",
+        "order_date",
+        "status",
+        "refund_amount"
+      ],
+      "dimensions": [
+        "channel",
+        "period"
+      ],
+      "time_column": "orders.order_date",
+      "grain": "订单队列×日期×渠道",
+      "unit": "ratio",
+      "filters": [
+        "orders.status='completed'",
+        "退款status='completed'",
+        "订单已完整观察30天"
+      ],
+      "additivity": "ratio",
+      "denominator": "已完整观察30天的完成订单去重数"
+    },
+    {
+      "id": "delivery_late_rate",
+      "name": "履约超时率",
+      "aliases": [
+        "履约超时率"
+      ],
+      "expression": "late_delivered_orders/NULLIF(delivered_orders,0)",
+      "description": "实际签收日期晚于承诺日期为超时；仅基于已签收包裹，未签收应单独报告。",
+      "tables": [
+        "shipments"
+      ],
+      "columns": [
+        "promised_date",
+        "delivered_date",
+        "carrier"
+      ],
+      "dimensions": [
+        "carrier"
+      ],
+      "time_column": "shipments.delivered_date",
+      "grain": "签收包裹",
+      "unit": "ratio",
+      "filters": [
+        "delivered_date IS NOT NULL"
+      ],
+      "additivity": "ratio",
+      "denominator": "实际已签收包裹数"
+    },
+    {
+      "id": "delivered_cohort_refund_rate",
+      "name": "成熟且履约可判定订单30日退款率",
+      "aliases": [
+        "成熟且履约可判定订单30日退款率"
+      ],
+      "expression": "refunded_orders_within_30d/NULLIF(known_fulfillment_mature_orders,0)",
+      "description": "完成订单先形成成熟30天队列；每单至少一个包裹，全部包裹承诺与签收日期完整且截至数据截止日均已签收才进入本诊断分母。成功退款须在下单后0至30天内，订单只计一次。按订单自身channel互斥分组；跨承运商多包裹不拆单。缺少/未签收包裹保留为配送未知，不当作按时，必须另报数量。",
+      "tables": [
+        "orders",
+        "shipments",
+        "refunds"
+      ],
+      "columns": [
+        "order_id",
+        "order_date",
+        "channel",
+        "status",
+        "promised_date",
+        "delivered_date",
+        "refund_date"
+      ],
+      "dimensions": [
+        "channel"
+      ],
+      "time_column": "orders.order_date",
+      "grain": "成熟且履约可判定订单队列×渠道",
+      "unit": "ratio",
+      "filters": [
+        "orders.status='completed'",
+        "order_date+30天<=数据截止日",
+        "所有包裹承诺与签收日期完整且截至截止日已签收",
+        "成功退款限定下单后0至30天"
+      ],
+      "additivity": "ratio",
+      "denominator": "成熟30天且所有包裹履约可判定的去重完成订单数"
+    },
+    {
+      "id": "delivered_order_late_rate",
+      "name": "成熟履约可判定订单延迟率",
+      "aliases": [
+        "成熟履约可判定订单延迟率"
+      ],
+      "expression": "late_orders/NULLIF(known_fulfillment_mature_orders,0)",
+      "description": "与delivered_cohort_refund_rate使用完全相同订单队列。包裹先按order_id汇总，每单任一包裹delivered_date>promised_date即判整单延迟；仅所有包裹可判定的订单进入分母。一单多包裹、多承运商也只计一次。不能替换按包裹计算的delivery_late_rate。",
+      "tables": [
+        "orders",
+        "shipments"
+      ],
+      "columns": [
+        "order_id",
+        "order_date",
+        "channel",
+        "status",
+        "promised_date",
+        "delivered_date"
+      ],
+      "dimensions": [
+        "channel"
+      ],
+      "time_column": "orders.order_date",
+      "grain": "成熟且履约可判定订单队列×渠道",
+      "unit": "ratio",
+      "filters": [
+        "orders.status='completed'",
+        "order_date+30天<=数据截止日",
+        "所有包裹承诺与签收日期完整且截至截止日已签收"
+      ],
+      "additivity": "ratio",
+      "denominator": "成熟30天且所有包裹履约可判定的去重完成订单数"
+    },
+    {
+      "id": "delivered_cohort_refund_amount",
+      "name": "成熟履约可判定订单队列30日退款金额",
+      "aliases": [
+        "成熟履约可判定订单队列30日退款金额"
+      ],
+      "expression": "SUM(refunds.refund_amount)",
+      "description": "严格复用delivered_cohort_refund_rate订单队列与下单后0至30天成功退款窗口，以订单日期归属，而非按refund_date汇总当期退款。每个refund_id只计一次金额，售后原因先按refund_id合并，多原因标记为多原因；批次标签按item_id归并，缺标签保留为未记录。分组退款订单数可跨原因重叠，不能将其简单求和当总退款订单数。",
+      "tables": [
+        "orders",
+        "shipments",
+        "refunds",
+        "return_cases",
+        "order_item_batches",
+        "product_batches",
+        "suppliers",
+        "products"
+      ],
+      "columns": [
+        "order_id",
+        "order_date",
+        "channel",
+        "promised_date",
+        "delivered_date",
+        "refund_id",
+        "refund_date",
+        "refund_amount",
+        "reason",
+        "item_id",
+        "batch_id",
+        "supplier_name",
+        "product_name"
+      ],
+      "dimensions": [
+        "channel",
+        "supplier",
+        "product"
+      ],
+      "time_column": "orders.order_date",
+      "grain": "成熟履约可判定订单队列中的成功退款记录",
+      "unit": "元",
+      "filters": [
+        "orders.status='completed'",
+        "order_date+30天<=数据截止日",
+        "所有包裹承诺与签收日期完整且截至截止日已签收",
+        "成功退款限定下单后0至30天"
+      ],
+      "additivity": "additive"
+    }
+  ],
+  "remove_business_knowledge": [
+    "campaign-context"
+  ],
+  "business_knowledge": [
+    {
+      "id": "attribution-boundary",
+      "title": "贡献利润及观察期边界",
+      "content": "订单队列利润按订单日期归属成功退款与费用，必须具备完整观察期；它不是财务会计权责利润。费用分解可精确勾稽，但不能据此声称活动带来了增量销量。",
+      "tags": [
+        "profit",
+        "refund"
+      ]
+    },
+    {
+      "id": "fulfillment-association",
+      "title": "履约与退款的证据边界",
+      "content": "履约承诺、实际签收和售后原因可用于分组诊断；登记原因及观察关联不能单独证明承运商或供应商的因果责任。",
+      "tags": [
+        "refund",
+        "fulfillment"
+      ]
+    }
+  ],
+  "dimensions": [
+    {
+      "id": "channel",
+      "table": "orders",
+      "column": "channel",
+      "type": "category"
+    },
+    {
+      "id": "product",
+      "table": "products",
+      "column": "product_name",
+      "type": "category",
+      "levels": [
+        "category",
+        "product_name"
+      ]
+    },
+    {
+      "id": "supplier",
+      "table": "suppliers",
+      "column": "supplier_name",
+      "type": "category"
+    },
+    {
+      "id": "carrier",
+      "table": "shipments",
+      "column": "carrier",
+      "type": "category"
+    }
+  ],
+  "capabilities": [
+    "profit_bridge",
+    "refund_diagnosis",
+    "cohort_filter",
+    "cross_fact_aggregation"
+  ],
+  "diagnostics": [
+    {
+      "id": "profit-bridge",
+      "title": "销售增长与贡献利润变动",
+      "tags": [
+        "profit",
+        "contribution"
+      ],
+      "tool": "profit_bridge",
+      "queries": [
+        {
+          "id": "profit_input",
+          "sql": "WITH s AS(SELECT o.order_date,o.channel,SUM(i.quantity*p.list_price) gross_sales,SUM(i.quantity*i.unit_cost) cogs FROM orders o JOIN order_items i ON o.order_id=i.order_id JOIN products p ON i.product_id=p.product_id WHERE o.status='completed' GROUP BY o.order_date,o.channel),d AS(SELECT o.order_date,o.channel,SUM(p.discount_amount) discounts FROM orders o JOIN order_promotions p ON o.order_id=p.order_id WHERE o.status='completed' GROUP BY o.order_date,o.channel),r AS(SELECT o.order_date,o.channel,SUM(r.refund_amount) refunds FROM orders o JOIN refunds r ON o.order_id=r.order_id WHERE o.status='completed' AND r.status='completed' GROUP BY o.order_date,o.channel),f AS(SELECT o.order_date,o.channel,SUM(f.shipping_cost) fulfillment,SUM(f.payment_fee) payment_fees FROM orders o JOIN shipments h ON o.order_id=h.order_id JOIN fulfillment_costs f ON h.shipment_id=f.shipment_id WHERE o.status='completed' GROUP BY o.order_date,o.channel) SELECT strftime(a.spend_date,'%Y-%m') period,date_trunc('month',a.spend_date)::DATE period_date,a.channel,SUM(COALESCE(s.gross_sales,0)) gross_sales,SUM(COALESCE(d.discounts,0)) discounts,SUM(COALESCE(r.refunds,0)) refunds,SUM(COALESCE(s.cogs,0)) cogs,SUM(COALESCE(f.fulfillment,0)) fulfillment,SUM(COALESCE(f.payment_fees,0)) payment_fees,SUM(a.spend) marketing FROM marketing_spend a LEFT JOIN s ON a.channel=s.channel AND a.spend_date=s.order_date LEFT JOIN d ON a.channel=d.channel AND a.spend_date=d.order_date LEFT JOIN r ON a.channel=r.channel AND a.spend_date=r.order_date LEFT JOIN f ON a.channel=f.channel AND a.spend_date=f.order_date WHERE a.spend_date<DATE '2025-12-01' GROUP BY 1,2,3 ORDER BY 1,3",
+          "metric_ids": [
+            "contribution_profit"
+          ]
+        }
+      ],
+      "config": {
+        "query_id": "profit_input",
+        "baseline_period": "2025-09",
+        "current_period": "2025-11"
+      }
+    },
+    {
+      "id": "refund-fulfillment",
+      "title": "成熟订单退款与履约、商品批次诊断",
+      "tags": [
+        "refund",
+        "fulfillment"
+      ],
+      "tool": "refund_diagnosis",
+      "queries": [
+        {
+          "id": "refund_input",
+          "sql": "WITH h AS(SELECT order_id,COUNT(*) packages,COUNT(*) FILTER(WHERE promised_date IS NOT NULL AND delivered_date IS NOT NULL AND delivered_date<=DATE '2025-12-31') signed_packages,MAX(CASE WHEN delivered_date>promised_date THEN 1 ELSE 0 END) is_late FROM shipments GROUP BY order_id),c AS(SELECT o.order_id,o.order_date,o.channel,CASE WHEN h.packages>0 AND h.signed_packages=h.packages THEN 1 ELSE 0 END known_fulfillment,COALESCE(h.is_late,0) is_late FROM orders o LEFT JOIN h ON o.order_id=h.order_id WHERE o.status='completed' AND o.order_date>=DATE '2025-10-01' AND o.order_date<DATE '2025-12-01' AND o.order_date+INTERVAL '30 days'<=DATE '2025-12-31'),r AS(SELECT r.order_id,COUNT(*) successful_refunds FROM refunds r JOIN c ON r.order_id=c.order_id WHERE r.status='completed' AND r.refund_date>=c.order_date AND r.refund_date<=c.order_date+INTERVAL '30 days' GROUP BY r.order_id) SELECT c.channel AS \"group\",COUNT(*) FILTER(WHERE c.known_fulfillment=1) orders,COUNT(*) FILTER(WHERE c.known_fulfillment=1 AND r.successful_refunds>0) refunded_orders,COUNT(*) FILTER(WHERE c.known_fulfillment=1 AND c.is_late=1) late_orders,COUNT(*) FILTER(WHERE c.known_fulfillment=1 AND c.is_late=1 AND r.successful_refunds>0) late_refunded_orders,COUNT(*) mature_orders,COUNT(*) FILTER(WHERE c.known_fulfillment=0) unknown_fulfillment_orders FROM c LEFT JOIN r ON c.order_id=r.order_id GROUP BY c.channel ORDER BY c.channel",
+          "metric_ids": [
+            "delivered_cohort_refund_rate",
+            "delivered_order_late_rate"
+          ]
+        },
+        {
+          "id": "refund_reasons",
+          "sql": "WITH h AS(SELECT order_id,COUNT(*) packages,COUNT(*) FILTER(WHERE promised_date IS NOT NULL AND delivered_date IS NOT NULL AND delivered_date<=DATE '2025-12-31') signed_packages,MAX(CASE WHEN delivered_date>promised_date THEN 1 ELSE 0 END) is_late FROM shipments GROUP BY order_id),c AS(SELECT o.order_id,o.order_date,o.channel,CASE WHEN h.packages>0 AND h.signed_packages=h.packages THEN 1 ELSE 0 END known_fulfillment,COALESCE(h.is_late,0) is_late FROM orders o LEFT JOIN h ON o.order_id=h.order_id WHERE o.status='completed' AND o.order_date>=DATE '2025-10-01' AND o.order_date<DATE '2025-12-01' AND o.order_date+INTERVAL '30 days'<=DATE '2025-12-31'),reason_by_refund AS(SELECT refund_id,CASE WHEN COUNT(DISTINCT reason)=1 THEN MIN(reason) WHEN COUNT(DISTINCT reason)>1 THEN '多原因' ELSE '未记录' END reason FROM return_cases GROUP BY refund_id),labels AS(SELECT ib.item_id,CASE WHEN COUNT(DISTINCT s.supplier_id)=1 THEN MIN(s.supplier_name) WHEN COUNT(DISTINCT s.supplier_id)>1 THEN '多供应商' ELSE '未记录' END supplier_name,CASE WHEN COUNT(DISTINCT p.product_id)=1 THEN MIN(p.product_name) WHEN COUNT(DISTINCT p.product_id)>1 THEN '多商品' ELSE '未记录' END product_name FROM order_item_batches ib LEFT JOIN product_batches b ON ib.batch_id=b.batch_id LEFT JOIN suppliers s ON b.supplier_id=s.supplier_id LEFT JOIN products p ON b.product_id=p.product_id GROUP BY ib.item_id) SELECT c.channel,COALESCE(l.supplier_name,'未记录') supplier_name,COALESCE(l.product_name,'未记录') product_name,COALESCE(a.reason,'未记录') reason,COUNT(DISTINCT r.order_id) refunded_orders,SUM(r.refund_amount) refunded_amount FROM c JOIN refunds r ON c.order_id=r.order_id LEFT JOIN reason_by_refund a ON r.refund_id=a.refund_id LEFT JOIN labels l ON r.item_id=l.item_id WHERE c.known_fulfillment=1 AND r.status='completed' AND r.refund_date>=c.order_date AND r.refund_date<=c.order_date+INTERVAL '30 days' GROUP BY 1,2,3,4 ORDER BY refunded_amount DESC,1,2,3,4",
+          "metric_ids": [
+            "delivered_cohort_refund_amount"
+          ]
+        }
+      ],
+      "config": {
+        "query_id": "refund_input"
+      },
+      "description": "主查询以订单日期的成熟30天队列统计：先按订单汇总全部包裹，只有截至观测截止日每个包裹的承诺日期与签收日期均完整且已签收，才能分类；任一包裹迟到即整单延迟。缺包裹、日期缺失、部分未签收保留为unknown_fulfillment_orders，不当作按时。主分组采用订单channel，不按carrier拆分跨承运商订单。成功退款限定下单后0至30天，订单去重；原因金额查询必须共享同一已签收可判定队列和退款窗口。"
+    }
+  ],
+  "dashboard_templates": [
+    {
+      "id": "commerce-operating",
+      "title": "交易与履约经营看板",
+      "cards": [
+        {
+          "id": "profit-bridge",
+          "title": "订单队列贡献利润桥接",
+          "chart": {
+            "type": "waterfall",
+            "x": "component",
+            "y": [
+              "delta"
+            ],
+            "unit": "元"
+          },
+          "query": {
+            "sql": "WITH s AS(SELECT o.order_date,o.channel,SUM(i.quantity*p.list_price) gross_sales,SUM(i.quantity*i.unit_cost) cogs FROM orders o JOIN order_items i ON o.order_id=i.order_id JOIN products p ON i.product_id=p.product_id WHERE o.status='completed' GROUP BY o.order_date,o.channel),d AS(SELECT o.order_date,o.channel,SUM(p.discount_amount) discounts FROM orders o JOIN order_promotions p ON o.order_id=p.order_id WHERE o.status='completed' GROUP BY o.order_date,o.channel),r AS(SELECT o.order_date,o.channel,SUM(r.refund_amount) refunds FROM orders o JOIN refunds r ON o.order_id=r.order_id WHERE o.status='completed' AND r.status='completed' GROUP BY o.order_date,o.channel),f AS(SELECT o.order_date,o.channel,SUM(f.shipping_cost) fulfillment,SUM(f.payment_fee) payment_fees FROM orders o JOIN shipments h ON o.order_id=h.order_id JOIN fulfillment_costs f ON h.shipment_id=f.shipment_id WHERE o.status='completed' GROUP BY o.order_date,o.channel) SELECT strftime(a.spend_date,'%Y-%m') period,date_trunc('month',a.spend_date)::DATE period_date,a.channel,SUM(COALESCE(s.gross_sales,0)) gross_sales,SUM(COALESCE(d.discounts,0)) discounts,SUM(COALESCE(r.refunds,0)) refunds,SUM(COALESCE(s.cogs,0)) cogs,SUM(COALESCE(f.fulfillment,0)) fulfillment,SUM(COALESCE(f.payment_fees,0)) payment_fees,SUM(a.spend) marketing FROM marketing_spend a LEFT JOIN s ON a.channel=s.channel AND a.spend_date=s.order_date LEFT JOIN d ON a.channel=d.channel AND a.spend_date=d.order_date LEFT JOIN r ON a.channel=r.channel AND a.spend_date=r.order_date LEFT JOIN f ON a.channel=f.channel AND a.spend_date=f.order_date WHERE a.spend_date<DATE '2025-12-01' GROUP BY 1,2,3 ORDER BY 1,3",
+            "metric_ids": [
+              "contribution_profit"
+            ],
+            "filter_bindings": {
+              "date_from": "period_date",
+              "date_to": "period_date",
+              "channel": "channel"
+            },
+            "id": "profit-bridge_input",
+            "filter_grain": "month"
+          },
+          "analysis_recipe": {
+            "tool": "profit_bridge",
+            "config": {}
+          },
+          "layout": {
+            "width": 12,
+            "order": 0
+          }
+        },
+        {
+          "id": "refund-suppliers",
+          "title": "同一成熟已签收队列的30日退款原因与批次",
+          "chart": {
+            "type": "table"
+          },
+          "query": {
+            "sql": "WITH h AS(SELECT order_id,COUNT(*) packages,COUNT(*) FILTER(WHERE promised_date IS NOT NULL AND delivered_date IS NOT NULL AND delivered_date<=DATE '2025-12-31') signed_packages,MAX(CASE WHEN delivered_date>promised_date THEN 1 ELSE 0 END) is_late FROM shipments GROUP BY order_id),c AS(SELECT o.order_id,o.order_date,o.channel,CASE WHEN h.packages>0 AND h.signed_packages=h.packages THEN 1 ELSE 0 END known_fulfillment,COALESCE(h.is_late,0) is_late FROM orders o LEFT JOIN h ON o.order_id=h.order_id WHERE o.status='completed' AND o.order_date>=DATE '2025-10-01' AND o.order_date<DATE '2025-12-01' AND o.order_date+INTERVAL '30 days'<=DATE '2025-12-31'),reason_by_refund AS(SELECT refund_id,CASE WHEN COUNT(DISTINCT reason)=1 THEN MIN(reason) WHEN COUNT(DISTINCT reason)>1 THEN '多原因' ELSE '未记录' END reason FROM return_cases GROUP BY refund_id),labels AS(SELECT ib.item_id,CASE WHEN COUNT(DISTINCT s.supplier_id)=1 THEN MIN(s.supplier_name) WHEN COUNT(DISTINCT s.supplier_id)>1 THEN '多供应商' ELSE '未记录' END supplier_name,CASE WHEN COUNT(DISTINCT p.product_id)=1 THEN MIN(p.product_name) WHEN COUNT(DISTINCT p.product_id)>1 THEN '多商品' ELSE '未记录' END product_name FROM order_item_batches ib LEFT JOIN product_batches b ON ib.batch_id=b.batch_id LEFT JOIN suppliers s ON b.supplier_id=s.supplier_id LEFT JOIN products p ON b.product_id=p.product_id GROUP BY ib.item_id) SELECT c.channel,COALESCE(l.supplier_name,'未记录') supplier_name,COALESCE(l.product_name,'未记录') product_name,COALESCE(a.reason,'未记录') reason,COUNT(DISTINCT r.order_id) refunded_orders,SUM(r.refund_amount) refunded_amount FROM c JOIN refunds r ON c.order_id=r.order_id LEFT JOIN reason_by_refund a ON r.refund_id=a.refund_id LEFT JOIN labels l ON r.item_id=l.item_id WHERE c.known_fulfillment=1 AND r.status='completed' AND r.refund_date>=c.order_date AND r.refund_date<=c.order_date+INTERVAL '30 days' GROUP BY 1,2,3,4 ORDER BY refunded_amount DESC,1,2,3,4",
+            "metric_ids": [
+              "delivered_cohort_refund_amount"
+            ],
+            "filter_bindings": {
+              "supplier": "supplier_name",
+              "channel": "channel"
+            },
+            "id": "refund-suppliers_input"
+          },
+          "layout": {
+            "width": 12,
+            "order": 1
+          }
+        },
+        {
+          "id": "sales-kpi",
+          "title": "2025年11月已完成销售额",
+          "chart": {
+            "type": "kpi",
+            "y": [
+              "sales"
+            ]
+          },
+          "query": {
+            "id": "sales-kpi_input",
+            "sql": "SELECT SUM(order_total) sales FROM orders WHERE status='completed' AND order_date>=DATE '2025-11-01' AND order_date<DATE '2025-12-01'",
+            "metric_ids": [
+              "sales"
+            ],
+            "filter_bindings": {}
+          },
+          "layout": {
+            "width": 6,
+            "order": 2
+          }
+        },
+        {
+          "id": "sales-trend",
+          "title": "月度销售趋势",
+          "chart": {
+            "type": "line",
+            "x": "period_date",
+            "y": [
+              "sales"
+            ]
+          },
+          "query": {
+            "id": "sales-trend_input",
+            "sql": "SELECT date_trunc('month',order_date)::DATE period_date,SUM(order_total) sales FROM orders WHERE status='completed' GROUP BY 1 ORDER BY 1",
+            "metric_ids": [
+              "sales"
+            ],
+            "filter_bindings": {
+              "date_from": "period_date",
+              "date_to": "period_date"
+            },
+            "filter_grain": "month"
+          },
+          "layout": {
+            "width": 12,
+            "order": 3
+          }
+        },
+        {
+          "id": "late-refund",
+          "title": "成熟且履约可判定订单退款关联（渠道）",
+          "chart": {
+            "type": "bar",
+            "x": "group",
+            "y": [
+              "late_refund_pct",
+              "on_time_refund_pct"
+            ]
+          },
+          "query": {
+            "id": "refund_input",
+            "sql": "WITH h AS(SELECT order_id,COUNT(*) packages,COUNT(*) FILTER(WHERE promised_date IS NOT NULL AND delivered_date IS NOT NULL AND delivered_date<=DATE '2025-12-31') signed_packages,MAX(CASE WHEN delivered_date>promised_date THEN 1 ELSE 0 END) is_late FROM shipments GROUP BY order_id),c AS(SELECT o.order_id,o.order_date,o.channel,CASE WHEN h.packages>0 AND h.signed_packages=h.packages THEN 1 ELSE 0 END known_fulfillment,COALESCE(h.is_late,0) is_late FROM orders o LEFT JOIN h ON o.order_id=h.order_id WHERE o.status='completed' AND o.order_date>=DATE '2025-10-01' AND o.order_date<DATE '2025-12-01' AND o.order_date+INTERVAL '30 days'<=DATE '2025-12-31'),r AS(SELECT r.order_id,COUNT(*) successful_refunds FROM refunds r JOIN c ON r.order_id=c.order_id WHERE r.status='completed' AND r.refund_date>=c.order_date AND r.refund_date<=c.order_date+INTERVAL '30 days' GROUP BY r.order_id) SELECT c.channel AS \"group\",COUNT(*) FILTER(WHERE c.known_fulfillment=1) orders,COUNT(*) FILTER(WHERE c.known_fulfillment=1 AND r.successful_refunds>0) refunded_orders,COUNT(*) FILTER(WHERE c.known_fulfillment=1 AND c.is_late=1) late_orders,COUNT(*) FILTER(WHERE c.known_fulfillment=1 AND c.is_late=1 AND r.successful_refunds>0) late_refunded_orders,COUNT(*) mature_orders,COUNT(*) FILTER(WHERE c.known_fulfillment=0) unknown_fulfillment_orders FROM c LEFT JOIN r ON c.order_id=r.order_id GROUP BY c.channel ORDER BY c.channel",
+            "metric_ids": [
+              "delivered_cohort_refund_rate",
+              "delivered_order_late_rate"
+            ],
+            "filter_bindings": {
+              "channel": "group"
+            }
+          },
+          "analysis_recipe": {
+            "tool": "refund_diagnosis",
+            "config": {}
+          },
+          "layout": {
+            "width": 12,
+            "order": 4
+          }
+        },
+        {
+          "id": "channel-profit",
+          "title": "2025年11月渠道毛利",
+          "chart": {
+            "type": "bar",
+            "x": "channel",
+            "y": [
+              "gross_profit"
+            ]
+          },
+          "query": {
+            "id": "channel-profit_input",
+            "sql": "SELECT channel,SUM(i.quantity*(i.unit_price-i.unit_cost)) gross_profit FROM orders o JOIN order_items i ON o.order_id=i.order_id WHERE o.status='completed' AND o.order_date>=DATE '2025-11-01' AND o.order_date<DATE '2025-12-01' GROUP BY channel ORDER BY gross_profit",
+            "metric_ids": [
+              "gross_profit"
+            ],
+            "filter_bindings": {
+              "channel": "channel"
+            }
+          },
+          "layout": {
+            "width": 12,
+            "order": 5
+          }
+        }
+      ]
+    }
+  ],
+  "evaluation": [
+    {
+      "id": "ec-11",
+      "question": "各承运商签收超时包裹有多少？",
+      "sql": "SELECT carrier,COUNT(*) FILTER(WHERE delivered_date>promised_date) late FROM shipments GROUP BY 1 ORDER BY 1",
+      "expected": [
+        [
+          "合成承运商A",
+          183
+        ],
+        [
+          "合成承运商B",
+          182
+        ]
+      ]
+    },
+    {
+      "id": "ec-12",
+      "question": "2025年10至11月各渠道实际折扣合计？",
+      "sql": "SELECT o.channel,SUM(p.discount_amount) discounts FROM orders o JOIN order_promotions p ON o.order_id=p.order_id WHERE o.order_date>=DATE '2025-10-01' AND o.order_date<DATE '2025-12-01' GROUP BY 1 ORDER BY 1",
+      "expected": [
+        [
+          "付费推广",
+          30375
+        ],
+        [
+          "平台商城",
+          28140
+        ],
+        [
+          "自然流量",
+          29570
+        ]
+      ]
+    },
+    {
+      "id": "ec-13",
+      "question": "各活动覆盖多少已完成订单？",
+      "sql": "SELECT c.campaign_name,COUNT(*) orders FROM campaigns c JOIN order_promotions p ON c.campaign_id=p.campaign_id GROUP BY 1 ORDER BY 1",
+      "expected": [
+        [
+          "常规获客",
+          3609
+        ],
+        [
+          "秋季促销",
+          1039
+        ]
+      ]
+    },
+    {
+      "id": "ec-14",
+      "question": "2025年各承运商履约费用是多少？",
+      "sql": "SELECT h.carrier,SUM(f.shipping_cost) shipping FROM fulfillment_costs f JOIN shipments h ON f.shipment_id=h.shipment_id JOIN orders o ON h.order_id=o.order_id WHERE o.order_date>=DATE '2025-01-01' GROUP BY 1 ORDER BY 1",
+      "expected": [
+        [
+          "合成承运商A",
+          12014
+        ],
+        [
+          "合成承运商B",
+          12002
+        ]
+      ]
+    },
+    {
+      "id": "ec-15",
+      "question": "各售后原因对应成功退款金额是多少？",
+      "sql": "SELECT c.reason,ROUND(SUM(r.refund_amount),2) amount FROM return_cases c JOIN refunds r ON c.refund_id=r.refund_id WHERE r.status='completed' GROUP BY 1 ORDER BY 1",
+      "expected": [
+        [
+          "商品破损",
+          78789.5
+        ],
+        [
+          "履约超时",
+          28424.65
+        ]
+      ]
+    },
+    {
+      "id": "ec-16",
+      "question": "各供应商有多少商品批次？",
+      "sql": "SELECT s.supplier_name,COUNT(*) batches FROM suppliers s JOIN product_batches b ON s.supplier_id=b.supplier_id GROUP BY 1 ORDER BY 1",
+      "expected": [
+        [
+          "合成供应商1",
+          4
+        ],
+        [
+          "合成供应商2",
+          4
+        ],
+        [
+          "合成供应商3",
+          4
+        ]
+      ]
+    },
+    {
+      "id": "ec-17",
+      "question": "各商品的成交批次明细数是多少？",
+      "sql": "SELECT p.product_name,COUNT(*) items FROM order_item_batches i JOIN product_batches b ON i.batch_id=b.batch_id JOIN products p ON b.product_id=p.product_id GROUP BY 1 ORDER BY 1",
+      "expected": [
+        [
+          "示例商品1",
+          1648
+        ],
+        [
+          "示例商品2",
+          1647
+        ],
+        [
+          "示例商品3",
+          1645
+        ],
+        [
+          "示例商品4",
+          1644
+        ],
+        [
+          "示例商品5",
+          1645
+        ],
+        [
+          "示例商品6",
+          1647
+        ]
+      ]
+    },
+    {
+      "id": "ec-18",
+      "question": "已完成订单的支付费用总额是多少？",
+      "sql": "SELECT ROUND(SUM(payment_fee),2) payment_fees FROM fulfillment_costs",
+      "expected": [
+        [
+          46160.76
+        ]
+      ]
+    },
+    {
+      "id": "ec-19",
+      "question": "超时签收的已完成订单有多少个？",
+      "sql": "SELECT COUNT(DISTINCT o.order_id) orders FROM orders o JOIN shipments h ON o.order_id=h.order_id WHERE o.status='completed' AND h.delivered_date>h.promised_date",
+      "expected": [
+        [
+          365
+        ]
+      ]
+    },
+    {
+      "id": "ec-20",
+      "question": "登记为履约超时且成功退款的订单数是多少？",
+      "sql": "SELECT COUNT(DISTINCT r.order_id) orders FROM return_cases c JOIN refunds r ON c.refund_id=r.refund_id WHERE c.reason='履约超时' AND r.status='completed'",
+      "expected": [
+        [
+          148
+        ]
+      ]
+    },
+    {
+      "id": "ec-07",
+      "question": "成功退款金额是多少？",
+      "sql": "SELECT ROUND(SUM(refund_amount),2) AS refunded FROM refunds WHERE status='completed'",
+      "expected": [
+        [
+          107214.15
+        ]
+      ]
+    },
+    {
+      "id": "ec-10",
+      "question": "2025年有多少笔成功退款？",
+      "sql": "SELECT COUNT(*) AS refunds FROM refunds WHERE status='completed' AND refund_date>=DATE '2025-01-01'",
+      "expected": [
+        [
+          282
+        ]
+      ]
+    }
+  ]
+}

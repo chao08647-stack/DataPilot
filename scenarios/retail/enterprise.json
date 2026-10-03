@@ -1,0 +1,984 @@
+{
+  "schema_version": "enterprise-2",
+  "enterprise": true,
+  "generator": "retail",
+  "synthetic": true,
+  "description": "门店经营、营业日历、排班、采购收货、调拨与库存流水业务域；支持同店销售分解及逐店商品库存勾稽。",
+  "tables": [
+    {
+      "name": "store_calendar",
+      "description": "门店营业日历；营业时间与客流需按相同日期对齐",
+      "grain": "门店×日期",
+      "columns": {
+        "store_id": "INTEGER",
+        "calendar_date": "DATE",
+        "is_open": "BOOLEAN",
+        "open_hours": "INTEGER"
+      }
+    },
+    {
+      "name": "staff_schedules",
+      "description": "排班工时记录，关联不代表员工效率因果",
+      "grain": "门店×日期",
+      "columns": {
+        "store_id": "INTEGER",
+        "work_date": "DATE",
+        "staff_count": "INTEGER",
+        "staff_hours": "INTEGER"
+      }
+    },
+    {
+      "name": "suppliers",
+      "description": "合成补货供应商",
+      "grain": "供应商",
+      "columns": {
+        "supplier_id": "INTEGER",
+        "supplier_name": "VARCHAR"
+      }
+    },
+    {
+      "name": "purchase_orders",
+      "description": "门店商品采购及承诺收货日期",
+      "grain": "采购单",
+      "columns": {
+        "po_id": "INTEGER",
+        "store_id": "INTEGER",
+        "product_id": "INTEGER",
+        "supplier_id": "INTEGER",
+        "ordered_date": "DATE",
+        "expected_date": "DATE",
+        "ordered_qty": "INTEGER"
+      }
+    },
+    {
+      "name": "goods_receipts",
+      "description": "已发生收货事实，可与采购交付承诺比较",
+      "grain": "收货单",
+      "columns": {
+        "receipt_id": "INTEGER",
+        "po_id": "INTEGER",
+        "received_date": "DATE",
+        "quantity": "INTEGER"
+      }
+    },
+    {
+      "name": "inventory_transfers",
+      "description": "门店间调拨，一行包含发出和接收门店",
+      "grain": "调拨",
+      "columns": {
+        "transfer_id": "INTEGER",
+        "from_store_id": "INTEGER",
+        "to_store_id": "INTEGER",
+        "product_id": "INTEGER",
+        "transfer_date": "DATE",
+        "quantity": "INTEGER"
+      }
+    },
+    {
+      "name": "inventory_movements",
+      "description": "库存流水，adjustment为有符号数，其他类型quantity为正数",
+      "grain": "流水",
+      "columns": {
+        "movement_id": "INTEGER",
+        "store_id": "INTEGER",
+        "product_id": "INTEGER",
+        "movement_date": "DATE",
+        "movement_type": "VARCHAR",
+        "quantity": "INTEGER"
+      }
+    },
+    {
+      "name": "inventory_periods",
+      "description": "完整月会计期间、上期末及天数；不是任意日期填充表",
+      "grain": "月份",
+      "columns": {
+        "period": "VARCHAR",
+        "period_start": "DATE",
+        "period_end": "DATE",
+        "previous_end": "DATE",
+        "day_count": "INTEGER"
+      }
+    }
+  ],
+  "relations": [
+    {
+      "left_table": "store_calendar",
+      "left_column": "store_id",
+      "right_table": "stores",
+      "right_column": "store_id",
+      "cardinality": "many_to_one"
+    },
+    {
+      "left_table": "staff_schedules",
+      "left_column": "store_id",
+      "right_table": "stores",
+      "right_column": "store_id",
+      "cardinality": "many_to_one"
+    },
+    {
+      "left_table": "footfall",
+      "left_column": "store_id",
+      "right_table": "store_calendar",
+      "right_column": "store_id",
+      "additional_keys": [
+        {
+          "left_column": "visit_date",
+          "right_column": "calendar_date"
+        }
+      ],
+      "description": "先按相同期间和业务实体聚合，再按完整键关联，不能连接原始多明细事实。",
+      "cardinality": "many_to_one",
+      "preaggregation": "两侧先分别按全部关联键聚合，包含日期与对象维度，禁止重复累计事实金额。"
+    },
+    {
+      "left_table": "store_calendar",
+      "left_column": "store_id",
+      "right_table": "staff_schedules",
+      "right_column": "store_id",
+      "additional_keys": [
+        {
+          "left_column": "calendar_date",
+          "right_column": "work_date"
+        }
+      ],
+      "description": "先按相同期间和业务实体聚合，再按完整键关联，不能连接原始多明细事实。",
+      "cardinality": "many_to_one",
+      "preaggregation": "两侧先分别按全部关联键聚合，包含日期与对象维度，禁止重复累计事实金额。"
+    },
+    {
+      "left_table": "purchase_orders",
+      "left_column": "store_id",
+      "right_table": "stores",
+      "right_column": "store_id",
+      "cardinality": "many_to_one"
+    },
+    {
+      "left_table": "purchase_orders",
+      "left_column": "product_id",
+      "right_table": "products",
+      "right_column": "product_id",
+      "cardinality": "many_to_one"
+    },
+    {
+      "left_table": "purchase_orders",
+      "left_column": "supplier_id",
+      "right_table": "suppliers",
+      "right_column": "supplier_id",
+      "cardinality": "many_to_one"
+    },
+    {
+      "left_table": "goods_receipts",
+      "left_column": "po_id",
+      "right_table": "purchase_orders",
+      "right_column": "po_id",
+      "cardinality": "many_to_one"
+    },
+    {
+      "left_table": "inventory_transfers",
+      "left_column": "from_store_id",
+      "right_table": "stores",
+      "right_column": "store_id",
+      "cardinality": "many_to_one"
+    },
+    {
+      "left_table": "inventory_transfers",
+      "left_column": "to_store_id",
+      "right_table": "stores",
+      "right_column": "store_id",
+      "cardinality": "many_to_one"
+    },
+    {
+      "left_table": "inventory_transfers",
+      "left_column": "product_id",
+      "right_table": "products",
+      "right_column": "product_id",
+      "cardinality": "many_to_one"
+    },
+    {
+      "left_table": "inventory_movements",
+      "left_column": "store_id",
+      "right_table": "stores",
+      "right_column": "store_id",
+      "cardinality": "many_to_one"
+    },
+    {
+      "left_table": "inventory_movements",
+      "left_column": "product_id",
+      "right_table": "products",
+      "right_column": "product_id",
+      "cardinality": "many_to_one"
+    },
+    {
+      "left_table": "inventory_periods",
+      "left_column": "period_end",
+      "right_table": "inventory_snapshots",
+      "right_column": "snapshot_date",
+      "cardinality": "many_to_one"
+    },
+    {
+      "left_table": "inventory_periods",
+      "left_column": "previous_end",
+      "right_table": "inventory_snapshots",
+      "right_column": "snapshot_date",
+      "cardinality": "many_to_one"
+    },
+    {
+      "left_table": "inventory_movements",
+      "left_column": "movement_date",
+      "right_table": "inventory_periods",
+      "right_column": "period_start",
+      "type": "temporal",
+      "end_column": "period_end",
+      "end_inclusive": true,
+      "allow_open_end": false,
+      "cardinality": "many_to_many",
+      "preaggregation": "时间有效期按单一不重叠窗口归属；各事实先按完整期间×对象粒度预聚合，禁止直接相乘。"
+    },
+    {
+      "left_table": "inventory_snapshots",
+      "left_column": "snapshot_date",
+      "right_table": "inventory_periods",
+      "right_column": "period_start",
+      "type": "temporal",
+      "end_column": "period_end",
+      "end_inclusive": true,
+      "allow_open_end": false,
+      "cardinality": "many_to_many",
+      "preaggregation": "时间有效期按单一不重叠窗口归属；各事实先按完整期间×对象粒度预聚合，禁止直接相乘。"
+    },
+    {
+      "left_table": "inventory_snapshots",
+      "left_column": "store_id",
+      "right_table": "inventory_snapshots",
+      "right_column": "store_id",
+      "additional_keys": [
+        {
+          "left_column": "product_id",
+          "right_column": "product_id"
+        }
+      ],
+      "description": "先按相同期间和业务实体聚合，再按完整键关联，不能连接原始多明细事实。",
+      "cardinality": "many_to_many",
+      "preaggregation": "时间有效期按单一不重叠窗口归属；各事实先按完整期间×对象粒度预聚合，禁止直接相乘。"
+    },
+    {
+      "left_table": "inventory_snapshots",
+      "left_column": "store_id",
+      "right_table": "inventory_movements",
+      "right_column": "store_id",
+      "additional_keys": [
+        {
+          "left_column": "product_id",
+          "right_column": "product_id"
+        }
+      ],
+      "description": "先按相同期间和业务实体聚合，再按完整键关联，不能连接原始多明细事实。",
+      "cardinality": "many_to_many",
+      "preaggregation": "时间有效期按单一不重叠窗口归属；各事实先按完整期间×对象粒度预聚合，禁止直接相乘。"
+    },
+    {
+      "left_table": "inventory_periods",
+      "left_column": "period_end",
+      "right_table": "inventory_periods",
+      "right_column": "period_end",
+      "cardinality": "many_to_one"
+    }
+  ],
+  "metrics": [
+    {
+      "id": "same_store_sales",
+      "name": "同店销售变化",
+      "aliases": [
+        "同店增长",
+        "门店销售诊断"
+      ],
+      "expression": "comparable_current_sales-comparable_baseline_sales",
+      "description": "两个期间均有有效营业观测的相同门店集合，统一完成交易口径。按营业门店天数×日均客流×交易/客流×客单价恒等式对称分解差额，不称作因果效果。",
+      "tables": [
+        "transactions",
+        "footfall",
+        "store_calendar"
+      ],
+      "columns": [
+        "transaction_total",
+        "transaction_id",
+        "transaction_date",
+        "visitors",
+        "visit_date",
+        "calendar_date",
+        "is_open",
+        "store_id"
+      ],
+      "dimensions": [
+        "store_id",
+        "region"
+      ],
+      "time_column": "store_calendar.calendar_date",
+      "grain": "可比门店×完整期间",
+      "unit": "元",
+      "filters": [
+        "两期间均有有效营业观测",
+        "transactions.status='completed'"
+      ],
+      "additivity": "non_additive"
+    },
+    {
+      "id": "inventory_balance",
+      "name": "库存勾稽残差",
+      "aliases": [
+        "库存对账",
+        "库存异常"
+      ],
+      "expression": "closing_stock-(opening_stock+receipts+transfer_in-sold_units-transfer_out+adjustments)",
+      "description": "逐店逐商品完整期间核对库存流量与时点，期初或期末快照缺失不能填零；绝对残差不得跨商品抵消。调整量带符号，销售与调出以正数从库存扣减。",
+      "tables": [
+        "inventory_snapshots",
+        "inventory_movements",
+        "inventory_periods"
+      ],
+      "columns": [
+        "stock_on_hand",
+        "snapshot_date",
+        "movement_date",
+        "movement_type",
+        "quantity",
+        "period_start",
+        "period_end",
+        "previous_end",
+        "store_id",
+        "product_id"
+      ],
+      "dimensions": [
+        "store_id",
+        "product_id"
+      ],
+      "time_column": "inventory_periods.period_end",
+      "grain": "门店×商品×月份",
+      "unit": "件",
+      "filters": [
+        "期初期末真实快照存在",
+        "调整量带符号"
+      ],
+      "additivity": "non_additive"
+    },
+    {
+      "id": "supplier_late_rate",
+      "name": "采购收货延迟率",
+      "aliases": [
+        "供应商交付及时率"
+      ],
+      "expression": "late_receipts/NULLIF(receipts,0)",
+      "description": "已发生收货中实际收货日期晚于采购承诺日期的比例；未交付订单应另报，不混入已收货分母。延迟与缺货仅构成观察关联。",
+      "tables": [
+        "purchase_orders",
+        "goods_receipts"
+      ],
+      "columns": [
+        "expected_date",
+        "received_date",
+        "po_id"
+      ],
+      "dimensions": [
+        "supplier_id",
+        "store_id",
+        "product_id"
+      ],
+      "time_column": "goods_receipts.received_date",
+      "grain": "收货记录",
+      "unit": "ratio",
+      "filters": [
+        "已发生收货"
+      ],
+      "additivity": "ratio",
+      "denominator": "已发生收货记录数"
+    }
+  ],
+  "business_knowledge": [
+    {
+      "id": "inventory-reconciliation",
+      "title": "库存勾稽与残差",
+      "content": "库存勾稽须按门店和商品分别计算期初加收货调入减销售调出加有符号调整，再与期末快照比较。不同对象正负残差不能抵消，缺失快照不填零。",
+      "tags": [
+        "inventory"
+      ]
+    },
+    {
+      "id": "symmetric-driver",
+      "title": "销售差额分解不是因果",
+      "content": "营业门店天数、日均客流、交易/客流比、客单价的乘积等于销售。对称分解分摊交互项可勾稽总差额，但不能证明排班、员工或活动的因果作用。",
+      "tags": [
+        "store",
+        "contribution"
+      ]
+    }
+  ],
+  "dimensions": [
+    {
+      "id": "store",
+      "table": "stores",
+      "column": "store_id",
+      "type": "entity",
+      "levels": [
+        "region",
+        "store_name"
+      ]
+    },
+    {
+      "id": "product",
+      "table": "products",
+      "column": "product_id",
+      "type": "entity",
+      "levels": [
+        "category",
+        "product_name"
+      ]
+    },
+    {
+      "id": "supplier",
+      "table": "suppliers",
+      "column": "supplier_name",
+      "type": "category"
+    }
+  ],
+  "capabilities": [
+    "same_store_decomposition",
+    "inventory_reconciliation",
+    "temporal_join",
+    "stock_flow_validation"
+  ],
+  "diagnostics": [
+    {
+      "id": "same-store",
+      "title": "同店销售与营业、客流、交易诊断",
+      "tags": [
+        "store",
+        "contribution"
+      ],
+      "tool": "same_store_decomposition",
+      "queries": [
+        {
+          "id": "same_store_input",
+          "sql": "WITH s AS(SELECT store_id,transaction_date,COUNT(*) transactions,SUM(transaction_total) sales FROM transactions WHERE status='completed' GROUP BY store_id,transaction_date) SELECT strftime(f.visit_date,'%Y-%m') period,date_trunc('month',f.visit_date)::DATE period_date,f.store_id,COUNT(*) FILTER(WHERE c.is_open) open_days,SUM(f.visitors) visitors,SUM(COALESCE(s.transactions,0)) transactions,SUM(COALESCE(s.sales,0)) sales FROM footfall f JOIN store_calendar c ON f.store_id=c.store_id AND f.visit_date=c.calendar_date LEFT JOIN s ON f.store_id=s.store_id AND f.visit_date=s.transaction_date WHERE c.is_open GROUP BY 1,2,3 ORDER BY 1,3",
+          "metric_ids": [
+            "same_store_sales"
+          ]
+        },
+        {
+          "id": "staff_context",
+          "sql": "SELECT s.store_name,SUM(c.open_hours) open_hours,SUM(f.staff_hours) staff_hours FROM stores s JOIN store_calendar c ON s.store_id=c.store_id JOIN staff_schedules f ON c.store_id=f.store_id AND c.calendar_date=f.work_date WHERE c.calendar_date>=DATE '2025-10-01' GROUP BY s.store_name ORDER BY s.store_name",
+          "metric_ids": []
+        }
+      ],
+      "config": {
+        "query_id": "same_store_input",
+        "baseline_period": "2025-09",
+        "current_period": "2025-11"
+      }
+    },
+    {
+      "id": "stock-balance",
+      "title": "库存流水、快照及供应交付诊断",
+      "tags": [
+        "inventory"
+      ],
+      "tool": "inventory_reconciliation",
+      "queries": [
+        {
+          "id": "inventory_input",
+          "sql": "WITH c AS(SELECT p.period,p.period_end period_date,i.store_id,i.product_id,i.stock_on_hand closing_stock FROM inventory_periods p JOIN inventory_snapshots i ON p.period_end=i.snapshot_date WHERE p.period_start>=DATE '2025-01-01'),o AS(SELECT p.period_end period_date,i.store_id,i.product_id,i.stock_on_hand opening_stock FROM inventory_periods p JOIN inventory_snapshots i ON p.previous_end=i.snapshot_date WHERE p.period_start>=DATE '2025-01-01'),f AS(SELECT p.period_end period_date,m.store_id,m.product_id,SUM(CASE WHEN m.movement_type='receipt' THEN m.quantity ELSE 0 END) receipts,SUM(CASE WHEN m.movement_type='sale' THEN m.quantity ELSE 0 END) sold_units,SUM(CASE WHEN m.movement_type='transfer_in' THEN m.quantity ELSE 0 END) transfer_in,SUM(CASE WHEN m.movement_type='transfer_out' THEN m.quantity ELSE 0 END) transfer_out,SUM(CASE WHEN m.movement_type='adjustment' THEN m.quantity ELSE 0 END) adjustments FROM inventory_periods p JOIN inventory_movements m ON m.movement_date>=p.period_start AND m.movement_date<=p.period_end WHERE p.period_start>=DATE '2025-01-01' GROUP BY 1,2,3),q AS(SELECT p.period_end period_date,i.store_id,i.product_id,MAX(p.day_count)-COUNT(*) missing_snapshots,COUNT(*) FILTER(WHERE i.stock_on_hand=0) zero_snapshots FROM inventory_periods p JOIN inventory_snapshots i ON i.snapshot_date>=p.period_start AND i.snapshot_date<=p.period_end WHERE p.period_start>=DATE '2025-01-01' GROUP BY 1,2,3) SELECT c.period,c.period_date,c.store_id,c.product_id,o.opening_stock,COALESCE(f.receipts,0) receipts,COALESCE(f.sold_units,0) sold_units,COALESCE(f.transfer_in,0) transfer_in,COALESCE(f.transfer_out,0) transfer_out,COALESCE(f.adjustments,0) adjustments,c.closing_stock,q.missing_snapshots,q.zero_snapshots FROM c LEFT JOIN o ON c.period_date=o.period_date AND c.store_id=o.store_id AND c.product_id=o.product_id LEFT JOIN f ON c.period_date=f.period_date AND c.store_id=f.store_id AND c.product_id=f.product_id LEFT JOIN q ON c.period_date=q.period_date AND c.store_id=q.store_id AND c.product_id=q.product_id ORDER BY c.period_date,c.store_id,c.product_id",
+          "metric_ids": [
+            "inventory_balance"
+          ]
+        },
+        {
+          "id": "delivery_context",
+          "sql": "SELECT p.store_id,p.product_id,s.supplier_name,COUNT(*) receipts,COUNT(*) FILTER(WHERE r.received_date>p.expected_date) late_receipts,SUM(r.quantity) received_units FROM purchase_orders p JOIN goods_receipts r ON p.po_id=r.po_id JOIN suppliers s ON p.supplier_id=s.supplier_id WHERE r.received_date>=DATE '2025-10-01' GROUP BY 1,2,3 ORDER BY late_receipts DESC,1,2",
+          "metric_ids": [
+            "supplier_late_rate"
+          ]
+        }
+      ],
+      "config": {
+        "query_id": "inventory_input",
+        "current_period": "2025-11"
+      }
+    }
+  ],
+  "dashboard_templates": [
+    {
+      "id": "retail-operating",
+      "title": "门店与供应库存看板",
+      "cards": [
+        {
+          "id": "same-store",
+          "title": "完整月份同店销售分解",
+          "chart": {
+            "type": "waterfall",
+            "x": "component",
+            "y": [
+              "delta"
+            ]
+          },
+          "query": {
+            "sql": "WITH s AS(SELECT store_id,transaction_date,COUNT(*) transactions,SUM(transaction_total) sales FROM transactions WHERE status='completed' GROUP BY store_id,transaction_date) SELECT strftime(f.visit_date,'%Y-%m') period,date_trunc('month',f.visit_date)::DATE period_date,f.store_id,COUNT(*) FILTER(WHERE c.is_open) open_days,SUM(f.visitors) visitors,SUM(COALESCE(s.transactions,0)) transactions,SUM(COALESCE(s.sales,0)) sales FROM footfall f JOIN store_calendar c ON f.store_id=c.store_id AND f.visit_date=c.calendar_date LEFT JOIN s ON f.store_id=s.store_id AND f.visit_date=s.transaction_date WHERE c.is_open GROUP BY 1,2,3 ORDER BY 1,3",
+            "metric_ids": [
+              "same_store_sales"
+            ],
+            "filter_bindings": {
+              "date_from": "period_date",
+              "date_to": "period_date",
+              "store": "store_id"
+            },
+            "id": "same-store_input",
+            "filter_grain": "month"
+          },
+          "analysis_recipe": {
+            "tool": "same_store_decomposition",
+            "config": {}
+          },
+          "layout": {
+            "width": 12,
+            "order": 0
+          }
+        },
+        {
+          "id": "stock-reconcile",
+          "title": "月末门店商品库存勾稽",
+          "chart": {
+            "type": "heatmap",
+            "x": "store_id",
+            "group_by": "product_id",
+            "y": [
+              "residual"
+            ]
+          },
+          "query": {
+            "sql": "WITH c AS(SELECT p.period,p.period_end period_date,i.store_id,i.product_id,i.stock_on_hand closing_stock FROM inventory_periods p JOIN inventory_snapshots i ON p.period_end=i.snapshot_date WHERE p.period_start>=DATE '2025-01-01'),o AS(SELECT p.period_end period_date,i.store_id,i.product_id,i.stock_on_hand opening_stock FROM inventory_periods p JOIN inventory_snapshots i ON p.previous_end=i.snapshot_date WHERE p.period_start>=DATE '2025-01-01'),f AS(SELECT p.period_end period_date,m.store_id,m.product_id,SUM(CASE WHEN m.movement_type='receipt' THEN m.quantity ELSE 0 END) receipts,SUM(CASE WHEN m.movement_type='sale' THEN m.quantity ELSE 0 END) sold_units,SUM(CASE WHEN m.movement_type='transfer_in' THEN m.quantity ELSE 0 END) transfer_in,SUM(CASE WHEN m.movement_type='transfer_out' THEN m.quantity ELSE 0 END) transfer_out,SUM(CASE WHEN m.movement_type='adjustment' THEN m.quantity ELSE 0 END) adjustments FROM inventory_periods p JOIN inventory_movements m ON m.movement_date>=p.period_start AND m.movement_date<=p.period_end WHERE p.period_start>=DATE '2025-01-01' GROUP BY 1,2,3),q AS(SELECT p.period_end period_date,i.store_id,i.product_id,MAX(p.day_count)-COUNT(*) missing_snapshots,COUNT(*) FILTER(WHERE i.stock_on_hand=0) zero_snapshots FROM inventory_periods p JOIN inventory_snapshots i ON i.snapshot_date>=p.period_start AND i.snapshot_date<=p.period_end WHERE p.period_start>=DATE '2025-01-01' GROUP BY 1,2,3) SELECT c.period,c.period_date,c.store_id,c.product_id,o.opening_stock,COALESCE(f.receipts,0) receipts,COALESCE(f.sold_units,0) sold_units,COALESCE(f.transfer_in,0) transfer_in,COALESCE(f.transfer_out,0) transfer_out,COALESCE(f.adjustments,0) adjustments,c.closing_stock,q.missing_snapshots,q.zero_snapshots FROM c LEFT JOIN o ON c.period_date=o.period_date AND c.store_id=o.store_id AND c.product_id=o.product_id LEFT JOIN f ON c.period_date=f.period_date AND c.store_id=f.store_id AND c.product_id=f.product_id LEFT JOIN q ON c.period_date=q.period_date AND c.store_id=q.store_id AND c.product_id=q.product_id ORDER BY c.period_date,c.store_id,c.product_id",
+            "metric_ids": [
+              "inventory_balance"
+            ],
+            "filter_bindings": {
+              "date_from": "period_date",
+              "date_to": "period_date",
+              "store": "store_id",
+              "product": "product_id"
+            },
+            "id": "stock-reconcile_input",
+            "filter_grain": "month_end"
+          },
+          "analysis_recipe": {
+            "tool": "inventory_reconciliation",
+            "config": {}
+          },
+          "layout": {
+            "width": 12,
+            "order": 1
+          }
+        },
+        {
+          "id": "supplier-delivery",
+          "title": "第四季度供货延迟线索",
+          "chart": {
+            "type": "table"
+          },
+          "query": {
+            "sql": "SELECT p.store_id,p.product_id,s.supplier_name,COUNT(*) receipts,COUNT(*) FILTER(WHERE r.received_date>p.expected_date) late_receipts,SUM(r.quantity) received_units FROM purchase_orders p JOIN goods_receipts r ON p.po_id=r.po_id JOIN suppliers s ON p.supplier_id=s.supplier_id WHERE r.received_date>=DATE '2025-10-01' GROUP BY 1,2,3 ORDER BY late_receipts DESC,1,2",
+            "metric_ids": [
+              "supplier_late_rate"
+            ],
+            "filter_bindings": {
+              "store": "store_id",
+              "product": "product_id",
+              "supplier": "supplier_name"
+            },
+            "id": "supplier-delivery_input"
+          },
+          "layout": {
+            "width": 12,
+            "order": 2
+          }
+        },
+        {
+          "id": "sales-kpi",
+          "title": "2025年11月门店销售额",
+          "chart": {
+            "type": "kpi",
+            "y": [
+              "sales"
+            ]
+          },
+          "query": {
+            "id": "sales-kpi_input",
+            "sql": "SELECT SUM(transaction_total) sales FROM transactions WHERE status='completed' AND transaction_date>=DATE '2025-11-01' AND transaction_date<DATE '2025-12-01'",
+            "metric_ids": [
+              "sales"
+            ],
+            "filter_bindings": {}
+          },
+          "layout": {
+            "width": 6,
+            "order": 3
+          }
+        },
+        {
+          "id": "sales-trend",
+          "title": "月度门店销售趋势",
+          "chart": {
+            "type": "line",
+            "x": "period_date",
+            "y": [
+              "sales"
+            ]
+          },
+          "query": {
+            "id": "sales-trend_input",
+            "sql": "SELECT date_trunc('month',transaction_date)::DATE period_date,SUM(transaction_total) sales FROM transactions WHERE status='completed' GROUP BY 1 ORDER BY 1",
+            "metric_ids": [
+              "sales"
+            ],
+            "filter_bindings": {
+              "date_from": "period_date",
+              "date_to": "period_date"
+            },
+            "filter_grain": "month"
+          },
+          "layout": {
+            "width": 12,
+            "order": 4
+          }
+        },
+        {
+          "id": "stockout-objects",
+          "title": "2025年11月缺货观测对象",
+          "chart": {
+            "type": "bar",
+            "x": "object",
+            "y": [
+              "zero_pct"
+            ]
+          },
+          "query": {
+            "id": "stockout-objects_input",
+            "sql": "SELECT CAST(store_id AS VARCHAR)||'-'||CAST(product_id AS VARCHAR) object,store_id,product_id,100.0*COUNT(*) FILTER(WHERE stock_on_hand=0)/COUNT(*) zero_pct FROM inventory_snapshots WHERE snapshot_date>=DATE '2025-11-01' AND snapshot_date<DATE '2025-12-01' GROUP BY store_id,product_id ORDER BY zero_pct DESC,store_id,product_id",
+            "metric_ids": [
+              "stockout_rate"
+            ],
+            "filter_bindings": {
+              "store": "store_id",
+              "product": "product_id"
+            }
+          },
+          "layout": {
+            "width": 12,
+            "order": 5
+          }
+        }
+      ]
+    }
+  ],
+  "evaluation": [
+    {
+      "id": "retail-11",
+      "question": "2025年第四季度各门店营业时长？",
+      "sql": "SELECT store_id,SUM(open_hours) hours FROM store_calendar WHERE calendar_date>=DATE '2025-10-01' GROUP BY 1 ORDER BY 1",
+      "expected": [
+        [
+          1,
+          920
+        ],
+        [
+          2,
+          552
+        ],
+        [
+          3,
+          920
+        ],
+        [
+          4,
+          920
+        ],
+        [
+          5,
+          920
+        ],
+        [
+          6,
+          920
+        ]
+      ]
+    },
+    {
+      "id": "retail-12",
+      "question": "2025年第四季度各门店排班工时？",
+      "sql": "SELECT store_id,SUM(staff_hours) hours FROM staff_schedules WHERE work_date>=DATE '2025-10-01' GROUP BY 1 ORDER BY 1",
+      "expected": [
+        [
+          1,
+          4600
+        ],
+        [
+          2,
+          1656
+        ],
+        [
+          3,
+          4600
+        ],
+        [
+          4,
+          4600
+        ],
+        [
+          5,
+          4600
+        ],
+        [
+          6,
+          4600
+        ]
+      ]
+    },
+    {
+      "id": "retail-13",
+      "question": "各供应商的采购数量？",
+      "sql": "SELECT s.supplier_name,SUM(p.ordered_qty) units FROM purchase_orders p JOIN suppliers s ON p.supplier_id=s.supplier_id GROUP BY 1 ORDER BY 1",
+      "expected": [
+        [
+          "合成补货供应商1",
+          25196
+        ],
+        [
+          "合成补货供应商2",
+          25084
+        ]
+      ]
+    },
+    {
+      "id": "retail-14",
+      "question": "2025年第四季度延迟收货单数？",
+      "sql": "SELECT COUNT(*) late_receipts FROM purchase_orders p JOIN goods_receipts r ON p.po_id=r.po_id WHERE r.received_date>=DATE '2025-10-01' AND r.received_date>p.expected_date",
+      "expected": [
+        [
+          12
+        ]
+      ]
+    },
+    {
+      "id": "retail-15",
+      "question": "2025年各商品调拨数量？",
+      "sql": "SELECT product_id,SUM(quantity) units FROM inventory_transfers WHERE transfer_date>=DATE '2025-01-01' GROUP BY 1 ORDER BY 1",
+      "expected": [
+        [
+          1,
+          36
+        ],
+        [
+          2,
+          36
+        ],
+        [
+          3,
+          36
+        ],
+        [
+          4,
+          36
+        ]
+      ]
+    },
+    {
+      "id": "retail-16",
+      "question": "2025年各流水类型数量合计？",
+      "sql": "SELECT movement_type,SUM(quantity) units FROM inventory_movements WHERE movement_date>=DATE '2025-01-01' GROUP BY 1 ORDER BY 1",
+      "expected": [
+        [
+          "adjustment",
+          -8825
+        ],
+        [
+          "receipt",
+          25356
+        ],
+        [
+          "sale",
+          16406
+        ],
+        [
+          "transfer_in",
+          144
+        ],
+        [
+          "transfer_out",
+          144
+        ]
+      ]
+    },
+    {
+      "id": "retail-17",
+      "question": "2025年11月门店3商品2盘点调整净额？",
+      "sql": "SELECT SUM(quantity) adjustment FROM inventory_movements WHERE store_id=3 AND product_id=2 AND movement_type='adjustment' AND movement_date>=DATE '2025-11-01' AND movement_date<DATE '2025-12-01'",
+      "expected": [
+        [
+          5
+        ]
+      ]
+    },
+    {
+      "id": "retail-18",
+      "question": "2025年各区域采购金额之外的收货件数？",
+      "sql": "SELECT s.region,SUM(r.quantity) units FROM stores s JOIN purchase_orders p ON s.store_id=p.store_id JOIN goods_receipts r ON p.po_id=r.po_id WHERE r.received_date>=DATE '2025-01-01' GROUP BY 1 ORDER BY 1",
+      "expected": [
+        [
+          "华东",
+          8780
+        ],
+        [
+          "华北",
+          8308
+        ],
+        [
+          "华南",
+          8268
+        ]
+      ]
+    },
+    {
+      "id": "retail-19",
+      "question": "2025年12月末各门店商品期末库存？",
+      "sql": "SELECT store_id,product_id,stock_on_hand FROM inventory_snapshots WHERE snapshot_date=DATE '2025-12-31' ORDER BY 1,2",
+      "expected": [
+        [
+          1,
+          1,
+          28
+        ],
+        [
+          1,
+          2,
+          29
+        ],
+        [
+          1,
+          3,
+          30
+        ],
+        [
+          1,
+          4,
+          31
+        ],
+        [
+          2,
+          1,
+          29
+        ],
+        [
+          2,
+          2,
+          30
+        ],
+        [
+          2,
+          3,
+          31
+        ],
+        [
+          2,
+          4,
+          32
+        ],
+        [
+          3,
+          1,
+          30
+        ],
+        [
+          3,
+          2,
+          31
+        ],
+        [
+          3,
+          3,
+          32
+        ],
+        [
+          3,
+          4,
+          33
+        ],
+        [
+          4,
+          1,
+          31
+        ],
+        [
+          4,
+          2,
+          32
+        ],
+        [
+          4,
+          3,
+          33
+        ],
+        [
+          4,
+          4,
+          34
+        ],
+        [
+          5,
+          1,
+          32
+        ],
+        [
+          5,
+          2,
+          33
+        ],
+        [
+          5,
+          3,
+          34
+        ],
+        [
+          5,
+          4,
+          35
+        ],
+        [
+          6,
+          1,
+          33
+        ],
+        [
+          6,
+          2,
+          34
+        ],
+        [
+          6,
+          3,
+          35
+        ],
+        [
+          6,
+          4,
+          36
+        ]
+      ]
+    },
+    {
+      "id": "retail-20",
+      "question": "2025年门店1到门店2的调拨批次数？",
+      "sql": "SELECT COUNT(*) transfers FROM inventory_transfers WHERE from_store_id=1 AND to_store_id=2 AND transfer_date>=DATE '2025-01-01'",
+      "expected": [
+        [
+          48
+        ]
+      ]
+    }
+  ]
+}

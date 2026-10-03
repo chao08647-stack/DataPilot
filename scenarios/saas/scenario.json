@@ -1,0 +1,660 @@
+{
+  "id": "saas",
+  "title": "SaaS 产品",
+  "description": "使用合成账户、用户、事件、订阅和账单，分析活跃、付费转化、留存与MRR；数据非真实客户记录。",
+  "schema_version": "1",
+  "date_range": {
+    "start": "2024-01-01",
+    "end": "2025-12-31"
+  },
+  "tables": [
+    {
+      "name": "accounts",
+      "description": "组织账户及注册来源，付费转化按账户计算",
+      "grain": "一账户一行",
+      "columns": {
+        "account_id": "INTEGER",
+        "account_name": "VARCHAR",
+        "signup_date": "DATE",
+        "industry": "VARCHAR",
+        "acquisition_channel": "VARCHAR"
+      }
+    },
+    {
+      "name": "users",
+      "description": "组织内用户，用户留存与活跃的去重单位",
+      "grain": "一用户一行",
+      "columns": {
+        "user_id": "INTEGER",
+        "account_id": "INTEGER",
+        "signup_date": "DATE",
+        "role": "VARCHAR"
+      }
+    },
+    {
+      "name": "events",
+      "description": "有效活跃事件；多事件不能重复计算用户",
+      "grain": "一活跃事件一行",
+      "columns": {
+        "event_id": "INTEGER",
+        "user_id": "INTEGER",
+        "event_date": "DATE",
+        "event_name": "VARCHAR"
+      }
+    },
+    {
+      "name": "subscriptions",
+      "description": "订阅有效区间为[start_date,end_date)，monthly_price已归一到月，不是原始年费",
+      "grain": "一订阅一行",
+      "columns": {
+        "subscription_id": "INTEGER",
+        "account_id": "INTEGER",
+        "plan": "VARCHAR",
+        "start_date": "DATE",
+        "end_date": "DATE",
+        "billing_cycle": "VARCHAR",
+        "monthly_price": "DOUBLE"
+      }
+    },
+    {
+      "name": "subscription_changes",
+      "description": "订阅变更事件，取消不是新增负收入账单",
+      "grain": "一变更一行",
+      "columns": {
+        "change_id": "INTEGER",
+        "subscription_id": "INTEGER",
+        "change_date": "DATE",
+        "change_type": "VARCHAR",
+        "old_mrr": "DOUBLE",
+        "new_mrr": "DOUBLE"
+      }
+    },
+    {
+      "name": "invoices",
+      "description": "账单收款记录，paid计入现金收款，open不计；年费账单不可直接当MRR",
+      "grain": "一账单一行",
+      "columns": {
+        "invoice_id": "INTEGER",
+        "account_id": "INTEGER",
+        "subscription_id": "INTEGER",
+        "invoice_date": "DATE",
+        "amount": "DOUBLE",
+        "status": "VARCHAR"
+      }
+    }
+  ],
+  "relations": [
+    {
+      "left_table": "users",
+      "left_column": "account_id",
+      "right_table": "accounts",
+      "right_column": "account_id",
+      "cardinality": "many_to_one"
+    },
+    {
+      "left_table": "events",
+      "left_column": "user_id",
+      "right_table": "users",
+      "right_column": "user_id",
+      "cardinality": "many_to_one"
+    },
+    {
+      "left_table": "subscriptions",
+      "left_column": "account_id",
+      "right_table": "accounts",
+      "right_column": "account_id",
+      "cardinality": "many_to_one"
+    },
+    {
+      "left_table": "subscription_changes",
+      "left_column": "subscription_id",
+      "right_table": "subscriptions",
+      "right_column": "subscription_id",
+      "cardinality": "many_to_one"
+    },
+    {
+      "left_table": "invoices",
+      "left_column": "subscription_id",
+      "right_table": "subscriptions",
+      "right_column": "subscription_id",
+      "cardinality": "many_to_one"
+    },
+    {
+      "left_table": "invoices",
+      "left_column": "account_id",
+      "right_table": "accounts",
+      "right_column": "account_id",
+      "cardinality": "many_to_one"
+    }
+  ],
+  "metrics": [
+    {
+      "id": "mau",
+      "name": "月活跃用户",
+      "aliases": [
+        "MAU",
+        "月活"
+      ],
+      "expression": "COUNT(DISTINCT events.user_id)",
+      "description": "按event_date自然月统计至少一次有效workspace_open事件的去重用户；不是账户数量。",
+      "tables": [
+        "events"
+      ],
+      "columns": [
+        "event_date",
+        "user_id",
+        "event_name"
+      ],
+      "dimensions": [
+        "industry",
+        "acquisition_channel",
+        "event_date"
+      ],
+      "time_column": "events.event_date",
+      "grain": "用户×自然月",
+      "unit": "users",
+      "filters": [
+        "events.event_name='workspace_open'"
+      ],
+      "additivity": "non_additive"
+    },
+    {
+      "id": "new_accounts",
+      "name": "新增账户",
+      "aliases": [
+        "新增组织",
+        "新注册客户"
+      ],
+      "expression": "COUNT(DISTINCT accounts.account_id)",
+      "description": "按账户signup_date计数，用户数不能代替账户数。",
+      "tables": [
+        "accounts"
+      ],
+      "columns": [
+        "account_id",
+        "signup_date"
+      ],
+      "dimensions": [
+        "industry",
+        "acquisition_channel",
+        "signup_date"
+      ],
+      "time_column": "accounts.signup_date",
+      "grain": "账户",
+      "unit": "accounts",
+      "filters": [],
+      "additivity": "non_additive"
+    },
+    {
+      "id": "conversion_30d",
+      "name": "30日付费转化率",
+      "aliases": [
+        "付费转化",
+        "转化率"
+      ],
+      "expression": "converted_accounts / NULLIF(eligible_accounts,0)",
+      "description": "注册后30日内有订阅开始的去重账户数/注册账户数；只纳入signup_date+30天不晚于数据截止日的成熟队列，不能把未成熟队列计为未转化。",
+      "tables": [
+        "accounts",
+        "subscriptions"
+      ],
+      "columns": [
+        "account_id",
+        "signup_date",
+        "start_date"
+      ],
+      "dimensions": [
+        "industry",
+        "acquisition_channel",
+        "signup_date"
+      ],
+      "time_column": "accounts.signup_date",
+      "grain": "注册账户队列",
+      "unit": "ratio",
+      "filters": [
+        "注册账户已完整观察30天"
+      ],
+      "additivity": "ratio",
+      "denominator": "已完整观察30天的注册账户数"
+    },
+    {
+      "id": "mrr",
+      "name": "月度经常性收入",
+      "aliases": [
+        "MRR",
+        "月经常性收入"
+      ],
+      "expression": "SUM(subscriptions.monthly_price)",
+      "description": "指定月末仍有效订阅的monthly_price之和；start_date<=月末且(end_date IS NULL OR end_date>月末)。monthly_price已归一到月，年付不再除12；不使用账单金额。",
+      "tables": [
+        "subscriptions"
+      ],
+      "columns": [
+        "monthly_price",
+        "start_date",
+        "end_date"
+      ],
+      "dimensions": [
+        "plan",
+        "industry",
+        "billing_cycle"
+      ],
+      "time_column": "subscriptions.start_date",
+      "grain": "月末有效订阅",
+      "unit": "CNY/month",
+      "filters": [
+        "effective_from<=时点",
+        "effective_to为空或>时点"
+      ],
+      "additivity": "semi_additive",
+      "non_additive_dimensions": [
+        "time"
+      ]
+    },
+    {
+      "id": "retention_7d",
+      "name": "7日用户留存率",
+      "aliases": [
+        "次周留存",
+        "7日留存"
+      ],
+      "expression": "retained_users / NULLIF(eligible_users,0)",
+      "description": "按用户注册队列统计注册后第7天至第13天至少一次有效事件的去重用户比例；仅纳入已完整观察13天的用户，分子分母均为用户粒度。",
+      "tables": [
+        "users",
+        "events"
+      ],
+      "columns": [
+        "user_id",
+        "signup_date",
+        "event_date"
+      ],
+      "dimensions": [
+        "signup_date",
+        "industry"
+      ],
+      "time_column": "users.signup_date",
+      "grain": "注册用户队列",
+      "unit": "ratio",
+      "filters": [
+        "注册用户已完整观察13天"
+      ],
+      "additivity": "ratio",
+      "denominator": "已完整观察13天的注册用户数"
+    },
+    {
+      "id": "cash_collected",
+      "name": "账单收款",
+      "aliases": [
+        "现金收入",
+        "已支付金额"
+      ],
+      "expression": "SUM(invoices.amount)",
+      "description": "按invoice_date统计status='paid'账单金额，指标是现金收款不是MRR或权责收入。",
+      "tables": [
+        "invoices"
+      ],
+      "columns": [
+        "amount",
+        "invoice_date",
+        "status"
+      ],
+      "dimensions": [
+        "invoice_date",
+        "industry"
+      ],
+      "time_column": "invoices.invoice_date",
+      "grain": "已支付账单",
+      "unit": "CNY",
+      "filters": [
+        "invoices.status='paid'"
+      ],
+      "additivity": "additive"
+    },
+    {
+      "id": "customer_churn",
+      "name": "付费账户流失率",
+      "aliases": [
+        "客户流失",
+        "流失率"
+      ],
+      "expression": "churned_start_accounts / NULLIF(active_start_accounts,0)",
+      "description": "以期初有效付费账户为分母，其中在本期结束前失去所有有效订阅的账户为分子；不得直接使用取消事件数除新增账户数。",
+      "tables": [
+        "subscriptions"
+      ],
+      "columns": [
+        "account_id",
+        "start_date",
+        "end_date"
+      ],
+      "dimensions": [
+        "plan",
+        "industry"
+      ],
+      "time_column": "subscriptions.end_date",
+      "grain": "期间×期初付费账户",
+      "unit": "ratio",
+      "filters": [
+        "期初有有效订阅"
+      ],
+      "additivity": "ratio",
+      "denominator": "期初拥有有效订阅的账户数"
+    }
+  ],
+  "examples": [
+    {
+      "id": "conversion-cohorts",
+      "question": "比较2025年注册账户的月度30日付费转化，排除未成熟队列。",
+      "title": "成熟注册队列的30日付费转化",
+      "sql": "SELECT strftime(a.signup_date,'%Y-%m') AS month,COUNT(DISTINCT a.account_id) AS eligible_accounts,COUNT(DISTINCT CASE WHEN s.start_date>=a.signup_date AND s.start_date<=a.signup_date+INTERVAL '30 days' THEN a.account_id END) AS converted_accounts,ROUND(COUNT(DISTINCT CASE WHEN s.start_date>=a.signup_date AND s.start_date<=a.signup_date+INTERVAL '30 days' THEN a.account_id END)*100.0/NULLIF(COUNT(DISTINCT a.account_id),0),2) AS conversion_pct FROM accounts a LEFT JOIN subscriptions s ON a.account_id=s.account_id WHERE a.signup_date>=DATE '2025-01-01' AND a.signup_date+INTERVAL '30 days'<=DATE '2025-12-31' GROUP BY 1 ORDER BY 1",
+      "x": "month",
+      "y": [
+        "conversion_pct"
+      ],
+      "chart_type": "line",
+      "tags": [
+        "conversion",
+        "trend"
+      ]
+    },
+    {
+      "id": "mrr-trend",
+      "question": "2025年各月末的MRR是多少？",
+      "title": "2025年月末MRR",
+      "sql": "SELECT '2025-01' AS month,COALESCE(SUM(monthly_price),0) AS mrr FROM subscriptions WHERE start_date<=DATE '2025-01-31' AND(end_date IS NULL OR end_date>DATE '2025-01-31') UNION ALL SELECT '2025-02' AS month,COALESCE(SUM(monthly_price),0) AS mrr FROM subscriptions WHERE start_date<=DATE '2025-02-28' AND(end_date IS NULL OR end_date>DATE '2025-02-28') UNION ALL SELECT '2025-03' AS month,COALESCE(SUM(monthly_price),0) AS mrr FROM subscriptions WHERE start_date<=DATE '2025-03-31' AND(end_date IS NULL OR end_date>DATE '2025-03-31') UNION ALL SELECT '2025-04' AS month,COALESCE(SUM(monthly_price),0) AS mrr FROM subscriptions WHERE start_date<=DATE '2025-04-30' AND(end_date IS NULL OR end_date>DATE '2025-04-30') UNION ALL SELECT '2025-05' AS month,COALESCE(SUM(monthly_price),0) AS mrr FROM subscriptions WHERE start_date<=DATE '2025-05-31' AND(end_date IS NULL OR end_date>DATE '2025-05-31') UNION ALL SELECT '2025-06' AS month,COALESCE(SUM(monthly_price),0) AS mrr FROM subscriptions WHERE start_date<=DATE '2025-06-30' AND(end_date IS NULL OR end_date>DATE '2025-06-30') UNION ALL SELECT '2025-07' AS month,COALESCE(SUM(monthly_price),0) AS mrr FROM subscriptions WHERE start_date<=DATE '2025-07-31' AND(end_date IS NULL OR end_date>DATE '2025-07-31') UNION ALL SELECT '2025-08' AS month,COALESCE(SUM(monthly_price),0) AS mrr FROM subscriptions WHERE start_date<=DATE '2025-08-31' AND(end_date IS NULL OR end_date>DATE '2025-08-31') UNION ALL SELECT '2025-09' AS month,COALESCE(SUM(monthly_price),0) AS mrr FROM subscriptions WHERE start_date<=DATE '2025-09-30' AND(end_date IS NULL OR end_date>DATE '2025-09-30') UNION ALL SELECT '2025-10' AS month,COALESCE(SUM(monthly_price),0) AS mrr FROM subscriptions WHERE start_date<=DATE '2025-10-31' AND(end_date IS NULL OR end_date>DATE '2025-10-31') UNION ALL SELECT '2025-11' AS month,COALESCE(SUM(monthly_price),0) AS mrr FROM subscriptions WHERE start_date<=DATE '2025-11-30' AND(end_date IS NULL OR end_date>DATE '2025-11-30') UNION ALL SELECT '2025-12' AS month,COALESCE(SUM(monthly_price),0) AS mrr FROM subscriptions WHERE start_date<=DATE '2025-12-31' AND(end_date IS NULL OR end_date>DATE '2025-12-31') ORDER BY month",
+      "x": "month",
+      "y": [
+        "mrr"
+      ],
+      "chart_type": "line",
+      "tags": [
+        "mrr",
+        "trend"
+      ]
+    }
+  ],
+  "business_knowledge": [
+    {
+      "id": "mrr-cash",
+      "title": "收款不等于MRR",
+      "content": "MRR是月末有效订阅的归一化月价格，现金收款受年付账单影响。subscriptions.monthly_price已归一为月价，年付订阅不能再次除12，也不能直接累计账单求MRR。",
+      "tags": [
+        "mrr",
+        "billing"
+      ]
+    },
+    {
+      "id": "cohort-maturity",
+      "title": "留存和转化需要完整观察期",
+      "content": "注册队列未达到完整观察期时应排除或标记未成熟，不将其视为零转化或零留存。使用场景数据截止日，而非假装有实时数据。",
+      "tags": [
+        "retention",
+        "conversion"
+      ]
+    },
+    {
+      "id": "account-user-grain",
+      "title": "账户与用户是不同粒度",
+      "content": "一个组织账户可有多个用户。付费转化和账户流失按account_id去重；活跃与用户留存按user_id去重。事件数不能代替用户数。",
+      "tags": [
+        "retention",
+        "conversion",
+        "join"
+      ]
+    },
+    {
+      "id": "subscription-boundary",
+      "title": "订阅有效区间边界",
+      "content": "订阅从start_date起生效，在end_date当天不再有效。月末MRR使用左闭右开区间，取消事件统计与期初客户流失率必须区分。",
+      "tags": [
+        "mrr",
+        "churn"
+      ]
+    }
+  ],
+  "preferences": [
+    {
+      "id": "weekly-cohort",
+      "title": "留存默认按注册周",
+      "key": "retention_cohort",
+      "value": "signup_week",
+      "description": "留存问题未指定队列时按注册周；明确注册月要求优先。"
+    },
+    {
+      "id": "sample-count",
+      "title": "展示样本量",
+      "key": "show_sample_size",
+      "value": true,
+      "description": "转化和留存结果同时查询并展示分母人数或账户数。"
+    },
+    {
+      "id": "conversion-first",
+      "title": "优先关注付费转化",
+      "key": "priority_metric",
+      "value": "conversion_30d",
+      "description": "产品概览可优先规划30日付费转化，不改变MRR等明确问题的目标。"
+    }
+  ],
+  "repair_experiences": [
+    {
+      "id": "saas-date-dialect",
+      "title": "日期函数方言不兼容",
+      "content": "DuckDB日期截断使用date_trunc，遇到其他数据库的月份截断函数应替换为当前方言等价写法；保持月初到下一月初的时间边界。",
+      "error_category": "dialect",
+      "tables": [
+        "events"
+      ],
+      "fixture_sql": [
+        "CREATE TABLE events(user_id INTEGER,event_date DATE)",
+        "INSERT INTO events VALUES(1,'2025-01-02'),(1,'2025-01-03'),(2,'2025-02-01')"
+      ],
+      "broken_sql": "SELECT DATE_FORMAT(event_date,'%Y-%m'),COUNT(DISTINCT user_id) FROM events GROUP BY 1",
+      "fixed_sql": "SELECT strftime(event_date,'%Y-%m'),COUNT(DISTINCT user_id) FROM events GROUP BY 1 ORDER BY 1",
+      "expected": [
+        [
+          "2025-01",
+          1
+        ],
+        [
+          "2025-02",
+          1
+        ]
+      ]
+    },
+    {
+      "id": "saas-wrong-column",
+      "title": "把月价列写成账单金额列",
+      "content": "生成订阅收入查询时需核对Schema，订阅表的月价字段是monthly_price，不是账单表的amount。修复字段引用后仍按有效区间验证口径。",
+      "error_category": "schema",
+      "tables": [
+        "subscriptions"
+      ],
+      "fixture_sql": [
+        "CREATE TABLE subscriptions(subscription_id INTEGER,monthly_price DOUBLE,start_date DATE,end_date DATE)",
+        "INSERT INTO subscriptions VALUES(1,100,'2025-01-01',NULL),(2,200,'2025-01-01',NULL)"
+      ],
+      "broken_sql": "SELECT SUM(amount) FROM subscriptions",
+      "fixed_sql": "SELECT SUM(monthly_price) FROM subscriptions WHERE start_date<=DATE '2025-01-31' AND(end_date IS NULL OR end_date>DATE '2025-01-31')",
+      "expected": [
+        [
+          300
+        ]
+      ]
+    },
+    {
+      "id": "saas-mrr-cash",
+      "title": "年费收款被当成MRR",
+      "content": "年付账单金额不能直接作为月经常性收入。回到已按月归一的订阅价格，在指定月末筛选有效订阅后求和；不要对monthly_price再除12。",
+      "error_category": "semantic",
+      "tables": [
+        "subscriptions",
+        "invoices"
+      ],
+      "fixture_sql": [
+        "CREATE TABLE subscriptions(subscription_id INTEGER,monthly_price DOUBLE,start_date DATE,end_date DATE)",
+        "CREATE TABLE invoices(subscription_id INTEGER,amount DOUBLE,status VARCHAR)",
+        "INSERT INTO subscriptions VALUES(1,100,'2025-01-01',NULL),(2,200,'2025-01-01',NULL)",
+        "INSERT INTO invoices VALUES(1,1200,'paid'),(2,200,'paid')"
+      ],
+      "broken_sql": "SELECT SUM(amount) FROM invoices WHERE status='paid'",
+      "fixed_sql": "SELECT SUM(monthly_price) FROM subscriptions WHERE start_date<=DATE '2025-01-31' AND(end_date IS NULL OR end_date>DATE '2025-01-31')",
+      "expected": [
+        [
+          300
+        ]
+      ]
+    },
+    {
+      "id": "saas-event-duplicate",
+      "title": "活跃事件数被当成活跃用户数",
+      "content": "同一用户一天或一个月可以产生多次活跃事件。月活指标应按user_id去重计数，不能用事件行数作为用户数。",
+      "error_category": "semantic",
+      "tables": [
+        "events"
+      ],
+      "fixture_sql": [
+        "CREATE TABLE events(event_id INTEGER,user_id INTEGER,event_date DATE)",
+        "INSERT INTO events VALUES(1,10,'2025-01-01'),(2,10,'2025-01-02'),(3,20,'2025-01-01')"
+      ],
+      "broken_sql": "SELECT COUNT(*) FROM events WHERE event_date>=DATE '2025-01-01' AND event_date<DATE '2025-02-01'",
+      "fixed_sql": "SELECT COUNT(DISTINCT user_id) FROM events WHERE event_date>=DATE '2025-01-01' AND event_date<DATE '2025-02-01'",
+      "expected": [
+        [
+          2
+        ]
+      ]
+    }
+  ],
+  "evaluation": [
+    {
+      "id": "saas-01",
+      "question": "总共有多少账户？",
+      "sql": "SELECT COUNT(*) AS accounts FROM accounts",
+      "expected": [
+        [
+          240
+        ]
+      ]
+    },
+    {
+      "id": "saas-02",
+      "question": "各角色有多少用户？",
+      "sql": "SELECT role,COUNT(*) AS users FROM users GROUP BY 1 ORDER BY 1",
+      "expected": [
+        [
+          "admin",
+          240
+        ],
+        [
+          "member",
+          240
+        ]
+      ]
+    },
+    {
+      "id": "saas-03",
+      "question": "2024和2025各新增多少账户？",
+      "sql": "SELECT year(signup_date) AS year,COUNT(*) AS accounts FROM accounts GROUP BY 1 ORDER BY 1",
+      "expected": [
+        [
+          2024,
+          120
+        ],
+        [
+          2025,
+          120
+        ]
+      ]
+    },
+    {
+      "id": "saas-04",
+      "question": "2025年12月31日MRR是多少？",
+      "sql": "SELECT SUM(monthly_price) AS mrr FROM subscriptions WHERE start_date<=DATE '2025-12-31' AND(end_date IS NULL OR end_date>DATE '2025-12-31')",
+      "expected": [
+        [
+          35000
+        ]
+      ]
+    },
+    {
+      "id": "saas-05",
+      "question": "2025年已支付账单的收款是多少？",
+      "sql": "SELECT SUM(amount) AS cash_collected FROM invoices WHERE status='paid' AND invoice_date>=DATE '2025-01-01' AND invoice_date<DATE '2026-01-01'",
+      "expected": [
+        [
+          391500
+        ]
+      ]
+    },
+    {
+      "id": "saas-06",
+      "question": "各订阅方案的历史订阅数是多少？",
+      "sql": "SELECT plan,COUNT(*) AS subscriptions FROM subscriptions GROUP BY 1 ORDER BY 1",
+      "expected": [
+        [
+          "专业版",
+          45
+        ],
+        [
+          "团队版",
+          45
+        ],
+        [
+          "基础版",
+          45
+        ]
+      ]
+    },
+    {
+      "id": "saas-07",
+      "question": "2025年1月月活用户是多少？",
+      "sql": "SELECT COUNT(DISTINCT user_id) AS mau FROM events WHERE event_date>=DATE '2025-01-01' AND event_date<DATE '2025-02-01'",
+      "expected": [
+        [
+          99
+        ]
+      ]
+    },
+    {
+      "id": "saas-08",
+      "question": "2025年10月注册账户的30日付费转化率是多少？",
+      "sql": "SELECT ROUND(COUNT(DISTINCT CASE WHEN s.start_date>=a.signup_date AND s.start_date<=a.signup_date+INTERVAL '30 days' THEN a.account_id END)*100.0/COUNT(DISTINCT a.account_id),2) AS conversion_pct FROM accounts a LEFT JOIN subscriptions s ON a.account_id=s.account_id WHERE a.signup_date>=DATE '2025-10-01' AND a.signup_date<DATE '2025-11-01'",
+      "expected": [
+        [
+          30
+        ]
+      ]
+    },
+    {
+      "id": "saas-09",
+      "question": "2025年6月注册用户的7日留存率是多少？",
+      "sql": "SELECT ROUND(COUNT(DISTINCT CASE WHEN e.event_date>=u.signup_date+INTERVAL '7 days' AND e.event_date<u.signup_date+INTERVAL '14 days' THEN u.user_id END)*100.0/COUNT(DISTINCT u.user_id),2) AS retention_pct FROM users u LEFT JOIN events e ON u.user_id=e.user_id WHERE u.signup_date>=DATE '2025-06-01' AND u.signup_date<DATE '2025-07-01'",
+      "expected": [
+        [
+          100
+        ]
+      ]
+    },
+    {
+      "id": "saas-10",
+      "question": "2025年发生多少次订阅取消事件？",
+      "sql": "SELECT COUNT(*) AS cancellation_events FROM subscription_changes WHERE change_type='cancelled' AND change_date>=DATE '2025-01-01' AND change_date<DATE '2026-01-01'",
+      "expected": [
+        [
+          15
+        ]
+      ]
+    }
+  ],
+  "clarifications": [
+    {
+      "question": "看看留存怎么样。",
+      "answer": "按2025年6月注册用户，分析注册后第7至13天的用户留存，并展示样本量。"
+    },
+    {
+      "question": "今年收入多少？",
+      "answer": "分析2025年每月末MRR，而不是当月收款。"
+    }
+  ]
+}
