@@ -21,6 +21,16 @@ class SQLRejected(ValueError):
     pass
 
 
+def _set_operation_scopes(scope):
+    # SQLGlot 30.19 renamed union_scopes to set_operation_scopes.
+    branches = getattr(scope, "set_operation_scopes", None)
+    if branches is None:
+        branches = getattr(scope, "union_scopes", None)
+    if not isinstance(branches, (list, tuple)) or len(branches) != 2:
+        raise SQLRejected("SQL 集合运算作用域无法安全解析。")
+    return branches
+
+
 _SAFE_FUNCTIONS = {
     # SQLGlot normalizes vendor names (strftime -> TIME_TO_STR, date_trunc -> TIMESTAMP_TRUNC).
     "AND", "OR", "CASE", "IF", "CAST", "TRY_CAST", "COALESCE", "NULLIF", "EXISTS",
@@ -247,7 +257,7 @@ def _validate_scopes(tree, scenario, approved, *, dialect="duckdb", schemas=None
 
             projected = {}
             if isinstance(scope.expression, exp.SetOperation):
-                branches = [outputs.get(id(branch), {}) for branch in scope.union_scopes]
+                branches = [outputs.get(id(branch), {}) for branch in _set_operation_scopes(scope)]
                 if branches:
                     for index, name in enumerate(branches[0]):
                         positions = [list(branch.values()) for branch in branches]
